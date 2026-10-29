@@ -109,6 +109,10 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    - **Buzz**: sum over videos of `(2 if in title else 1) × (1 + log10(1 + views))`
    - **Last 7d vs prev 7d** video counts give the trend label: `NEW`, `RISING` (≥1.5×), `STEADY`, `FALLING` (≤0.67×)
    - **Sentiment**: share of bullish / neutral / bearish videos, net score from −1 to +1
+   - **YouTube call**: how many videos made a buy, hold or sell call ("hold", "keep holding", "stay invested",
+     "hold karein/rakhein", "ہولڈ" are hold calls; buy or sell in the same clause wins, and "holding company" or
+     "Engro Holdings" don't count). The label is `BUY`, `HOLD` or `SELL` when one call has at least half of 3+ calls,
+     `MIXED` otherwise, `-` with fewer. It reports what the channels said; it is not a recommendation.
    - **Tone trend**: net sentiment in the last 7 days vs the 7 days before, labelled `IMPROVING` (up ≥0.25),
      `WORSENING` (down ≥0.25) or `STABLE`. Each week needs 3+ videos, otherwise it shows `-`, so one video can't
      flip the label. Useful for spotting a stock whose buzz is rising while the tone turns bearish.
