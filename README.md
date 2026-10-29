@@ -50,7 +50,7 @@ the run summary, and the report and CSV can be downloaded from the run's artifac
 
 | Command | Does |
 |---------|------|
-| `add-channel REF... [--file F]` | add channels by `@handle`, URL or `UC...` id |
+| `add-channel REF... [--file F]` | add channels by `@handle`, channel URL (`/@name`, `/channel/`, `/c/`, `/user/`) or `UC...` id |
 | `channels` | list tracked channels and video counts |
 | `fetch [--transcripts] [--max N]` | download video metadata (and captions) |
 | `analyze` | detect stock mentions in all stored videos |

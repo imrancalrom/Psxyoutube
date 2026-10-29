@@ -4,8 +4,9 @@ import os
 import tempfile
 import unittest
 from datetime import date
+from unittest import mock
 
-from psx_yt import cli, db
+from psx_yt import cli, db, youtube
 from psx_yt.analyzer import Analyzer, analyze_video
 from psx_yt.tickers import load_tickers
 from psx_yt.trends import compute, tone_label, trend_label
@@ -96,6 +97,16 @@ class YouTubeTests(unittest.TestCase):
         cid = "UCabcdefghijklmnopqrstuv"
         self.assertEqual(resolve_channel(cid), (cid, None))
         self.assertEqual(resolve_channel(f"https://www.youtube.com/channel/{cid}"), (cid, None))
+
+    def test_resolve_legacy_urls_scrape_page(self):
+        page = mock.Mock(text='<meta property="og:title" content="Pakistan Stock Exchange &amp; Co">'
+                              '"externalId":"UCabcdefghijklmnopqrstuv"')
+        with mock.patch.object(youtube, "_get", return_value=page) as get:
+            for ref, url in (("https://m.youtube.com/c/PakistanStockExchangeLimited/videos",
+                              "https://www.youtube.com/c/PakistanStockExchangeLimited"),
+                             ("youtube.com/user/SomeName", "https://www.youtube.com/user/SomeName")):
+                self.assertEqual(resolve_channel(ref), ("UCabcdefghijklmnopqrstuv", "Pakistan Stock Exchange & Co"))
+                get.assert_called_with(url)
 
 
 class TrendTests(unittest.TestCase):
