@@ -126,6 +126,30 @@ _STOCKS = [
     ("TPLP", "TPL Properties", "Real Estate", ["tpl properties"], False),
     ("JSCL", "Jahangir Siddiqui & Co", "Investment", ["jahangir siddiqui"], False),
 ]
+
+# Words that name a whole sector. Kept specific on purpose: no bare "bank" (State Bank), "power" or "tech".
+# Generic "oil & gas" talk on PSX is mostly about the E&P names, so it counts there.
+SECTOR_ALIASES = {
+    "Banks": ["banks", "banking", "banking sector", "bank stocks", "بینکنگ", "بینکس"],
+    "Cement": ["cement", "cement sector", "cements", "سیمنٹ"],
+    "Oil & Gas E&P": ["E&P", "E & P", "exploration and production", "exploration & production", "oil & gas",
+                      "oil and gas", "oil sector", "آئل اینڈ گیس"],
+    "Oil & Gas Marketing": ["OMC", "OMCs", "oil marketing", "oil marketing companies", "gas utilities"],
+    "Refinery": ["refinery", "refineries", "refining", "ریفائنری"],
+    "Power": ["power sector", "power stocks", "IPP", "IPPs", "power companies"],
+    "Fertilizer": ["fertilizer", "fertilizers", "fertiliser", "fertilisers", "urea", "کھاد"],
+    "Technology": ["tech sector", "tech stocks", "technology sector", "technology stocks", "IT sector", "IT stocks"],
+    "Automobile": ["auto sector", "autos", "auto stocks", "automobile", "automobiles", "car makers", "assemblers"],
+    "Pharma": ["pharma", "pharmaceutical", "pharmaceuticals", "فارما"],
+    "Textile": ["textile", "textiles", "textile sector", "ٹیکسٹائل"],
+    "Food": ["food sector", "food companies", "food stocks", "FMCG"],
+    "Engineering": ["steel", "steel sector", "steel stocks", "engineering sector"],
+    "Chemicals": ["chemical sector", "chemicals"],
+    "Glass": ["glass sector"],
+    "Paper & Board": ["paper sector", "packaging sector"],
+    "Tobacco": ["tobacco"],
+    "Real Estate": ["real estate", "REIT", "REITs"],
+}
 # fmt: on
 
 

@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from . import db, youtube
-from .analyzer import Analyzer, analyze_video
+from .analyzer import Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines
 from .report import write_report
 from .tickers import load_tickers
 from .trends import compute
@@ -65,32 +65,79 @@ def cmd_fetch(args, conn):
         conn.commit()
         print(f"  {title or ch['id']}: {len(videos)} videos")
     if args.transcripts:
-        ids = db.video_ids_without_transcript(conn)
-        print(f"Fetching transcripts for {len(ids)} videos")
-        for i, vid in enumerate(ids, 1):
-            text = youtube.fetch_transcript(vid)
-            # Store "" when captions are unavailable so we don't retry every run.
-            conn.execute("UPDATE videos SET transcript = ? WHERE id = ?", (text or "", vid))
-            if i % 20 == 0:
-                conn.commit()
-                print(f"  {i}/{len(ids)}")
-        conn.commit()
+        fetch_transcripts(conn, retry=args.retry_captions)
+
+
+CAPTION_GRACE = timedelta(days=2)  # YouTube can take a while to auto-generate captions for new uploads
+MAX_FAILURES_IN_A_ROW = 5  # stop early when YouTube is blocking us rather than hammering it
+
+
+def fetch_transcripts(conn, retry: bool = False):
+    """Download captions for videos that have none stored yet.
+
+    A video is marked caption-less ("") only when YouTube says it has none and it is older than CAPTION_GRACE;
+    blocks and errors leave it NULL so the next run tries again.
+    """
+    if retry:
+        print(f"Retrying captions for {db.reset_empty_transcripts(conn)} videos previously marked as having none")
+    rows = db.videos_without_transcript(conn)
+    print(f"Fetching captions for {len(rows)} videos")
+    now = datetime.now(timezone.utc)
+    counts = {"ok": 0, "none": 0, "blocked": 0, "error": 0}
+    in_a_row = 0
+    for i, r in enumerate(rows, 1):
+        text, status, detail = youtube.fetch_transcript(r["id"])
+        if status == "missing-lib":
+            print("  ! youtube-transcript-api is not installed: pip install youtube-transcript-api")
+            return
+        counts[status] += 1
+        if status in ("blocked", "error") and counts[status] == 1:
+            print(f"  ! {r['id']}: {status} ({detail})")
+        if status == "ok":
+            conn.execute("UPDATE videos SET transcript = ? WHERE id = ?", (text, r["id"]))
+        elif status == "none":
+            published = datetime.fromisoformat(r["published_at"].replace("Z", "+00:00"))
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=timezone.utc)
+            if now - published > CAPTION_GRACE:
+                conn.execute("UPDATE videos SET transcript = '' WHERE id = ?", (r["id"],))
+        in_a_row = in_a_row + 1 if status in ("blocked", "error") else 0
+        if in_a_row >= MAX_FAILURES_IN_A_ROW:
+            print(f"  ! {in_a_row} failures in a row ({status}); stopping, the rest will be tried next run")
+            break
+        if i % 20 == 0:
+            conn.commit()
+            print(f"  {i}/{len(rows)}")
+    conn.commit()
+    print("Captions: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
+    if counts["blocked"]:
+        print("  YouTube is blocking caption requests from this network; they will be retried next run.")
 
 
 def cmd_analyze(args, conn):
     analyzer = Analyzer(load_tickers(args.tickers))
     conn.execute("DELETE FROM mentions")
-    n_videos = n_mentions = 0
-    for v in conn.execute("SELECT id, title, description, transcript FROM videos").fetchall():
+    conn.execute("DELETE FROM sector_mentions")
+    n_videos = n_mentions = n_sectors = 0
+    videos = conn.execute("SELECT id, channel_id, title, description, transcript FROM videos").fetchall()
+    by_channel: dict[str, list[str]] = {}
+    for v in videos:
+        by_channel.setdefault(v["channel_id"], []).append(v["description"] or "")
+    boilerplate = {cid: boilerplate_lines(descs) for cid, descs in by_channel.items()}
+    for v in videos:
         n_videos += 1
-        for sym, m in analyze_video(analyzer, v["title"], v["description"], v["transcript"]).items():
-            conn.execute(
-                "INSERT INTO mentions VALUES (?, ?, ?, ?, ?, ?)",
-                (v["id"], sym, m["title"], m["description"], m["transcript"], m["sentiment"]),
-            )
-            n_mentions += 1
+        texts = (v["title"], strip_lines(v["description"], boilerplate[v["channel_id"]]), v["transcript"])
+        for table, found in (("mentions", analyze_video(analyzer, *texts)),
+                             ("sector_mentions", analyze_video_sectors(analyzer, *texts))):
+            for key, m in found.items():
+                conn.execute(f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?)",
+                             (v["id"], key, m["title"], m["description"], m["transcript"], m["sentiment"]))
+            if table == "mentions":
+                n_mentions += len(found)
+            else:
+                n_sectors += len(found)
     conn.commit()
-    print(f"Analyzed {n_videos} videos: {n_mentions} stock mentions")
+    print(f"Analyzed {n_videos} videos: {n_mentions} stock mentions, {n_sectors} sectors named outright")
 
 
 def tone_cell(s: dict) -> str:
@@ -109,21 +156,32 @@ def cmd_top(args, conn):
               f"{s['sentiment_score']:>+5.2f}  {tone_cell(s):<16}")
     if not data["stocks"]:
         print("No mentions found. Run `fetch` and `analyze` first.")
+    if data["sectors"]:
+        print(f"\n     {'Sector':<20} {'Buzz':>7} {'Videos':>6} {'Named':>5} "
+              f"{'7d':>4} {'prev':>4}  {'Trend':<8} {'Sent':>5}  {'Tone 7d':<16} Stocks")
+        for s in data["sectors"][: args.limit]:
+            print(f"     {s['sector'][:20]:<20} {s['buzz']:>7} {s['videos']:>6} {s['direct_videos']:>5} "
+                  f"{s['recent']:>4} {s['previous']:>4}  {s['trend']:<8} {s['sentiment_score']:>+5.2f}  "
+                  f"{tone_cell(s):<16} {' '.join(s['stocks'][:5])}")
 
 
 def cmd_report(args, conn):
     data = compute(conn, load_tickers(args.tickers), days=args.days)
     path = write_report(data, args.output)
-    print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks)")
+    print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors)")
 
 
 EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
                  "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "tone_recent", "tone_previous",
                  "tone_change", "tone_trend", "views"]
+SECTOR_EXPORT_FIELDS = ["sector", "buzz", "videos", "direct_videos", "mentions", "title_videos", "channel_count",
+                        "recent", "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score",
+                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "views"]
 
 
 def cmd_export(args, conn):
-    """Leaderboard as CSV (one row per stock) or JSON (everything the dashboard uses), picked by file extension."""
+    """Leaderboard as CSV (one row per stock, or per sector with --sectors) or JSON (everything the dashboard uses),
+    picked by file extension."""
     data = compute(conn, load_tickers(args.tickers), days=args.days)
     if args.output.lower().endswith(".json"):
         with open(args.output, "w", encoding="utf-8") as f:
@@ -131,11 +189,16 @@ def cmd_export(args, conn):
     else:
         # utf-8-sig so Excel shows Urdu company names and channel titles correctly.
         with open(args.output, "w", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, ["rank", *EXPORT_FIELDS, "channels"], extrasaction="ignore")
+            fields, rows = ((SECTOR_EXPORT_FIELDS, data["sectors"]) if args.sectors
+                            else (EXPORT_FIELDS, data["stocks"]))
+            extra = ["stocks", "channels"] if args.sectors else ["channels"]
+            w = csv.DictWriter(f, ["rank", *fields, *extra], extrasaction="ignore")
             w.writeheader()
-            for i, s in enumerate(data["stocks"], 1):
-                w.writerow({**s, "rank": i, "channels": "; ".join(s["channels"])})
-    print(f"Exported {len(data['stocks'])} stocks to {args.output}")
+            for i, s in enumerate(rows, 1):
+                w.writerow({**s, "rank": i, **{k: "; ".join(s[k]) for k in extra}})
+    what = f"{len(data['sectors'])} sectors" if args.sectors and not args.output.lower().endswith(".json") \
+        else f"{len(data['stocks'])} stocks"
+    print(f"Exported {what} to {args.output}")
 
 
 def cmd_run(args, conn):
@@ -153,6 +216,9 @@ DEMO_TEMPLATES = [
     ("{a} crash: what went wrong? Losses explained", -1),
     ("PSX market update: {a}, {b} and {c} in focus today", 0),
     ("KSE-100 weekly review | {a} and {b} discussed", 0),
+    ("Cement sector rally: {a} and {b} lead the way", 1),
+    ("Refineries in momentum, {a} in focus", 1),
+    ("Selling from banks - {a} under pressure", -1),
 ]
 DEMO_WEIGHTS = {  # symbol: (popularity, bullishness, recent boost)
     "OGDC": (9, 0.6, 1.0), "HUBC": (8, 0.7, 1.8), "LUCK": (7, 0.5, 1.0), "MEBL": (7, 0.7, 1.2),
@@ -220,6 +286,8 @@ def main(argv=None):
     def fetch_opts(sp):
         sp.add_argument("--max", type=int, default=200, help="Max videos per channel in API mode")
         sp.add_argument("--transcripts", action="store_true", help="Also download captions (slower, more accurate)")
+        sp.add_argument("--retry-captions", action="store_true",
+                        help="With --transcripts: try again for videos previously marked as having no captions")
 
     def view_opts(sp):
         sp.add_argument("--days", type=int, default=30, help="Look-back period in days")
@@ -239,6 +307,7 @@ def main(argv=None):
     s = sub.add_parser("export", help="Save the leaderboard as CSV or JSON (by file extension)")
     s.add_argument("--days", type=int, default=30, help="Look-back period in days")
     s.add_argument("-o", "--output", default="psx_buzz.csv", help="Output file, .csv or .json")
+    s.add_argument("--sectors", action="store_true", help="CSV of sectors instead of stocks")
     s.set_defaults(func=cmd_export)
     s = sub.add_parser("run", help="fetch + analyze + top + report")
     fetch_opts(s)

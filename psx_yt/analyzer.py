@@ -3,13 +3,13 @@
 import re
 from dataclasses import dataclass
 
-from .tickers import Stock
+from .tickers import SECTOR_ALIASES, Stock
 
 # Bullish / bearish cue words in English, Roman Urdu and Urdu script.
 BULLISH = [
     r"buy(?:ing)?", r"bullish", r"break\s?out", r"targets?", r"upside", r"accumulat\w*", r"rall(?:y|ies)",
     r"up\s?trend", r"undervalued", r"dividends?", r"payout", r"rebound\w*", r"multi\s?bagger", r"top pick",
-    r"strong results", r"record profits?", r"outperform\w*", r"all[\s-]time high", r"new high",
+    r"strong results", r"record profits?", r"outperform\w*", r"all[\s-]time high", r"new high", r"momentum", r"turn\s?around",
     r"khareed\w*", r"kharid\w*", r"tezi", r"taizi", r"munafa", r"خرید\w*", r"تیزی", r"منافع",
 ]
 BEARISH = [
@@ -43,8 +43,11 @@ def _alias_pattern(alias: str) -> str:
 
 
 class Analyzer:
-    def __init__(self, stocks: dict[str, Stock]):
+    def __init__(self, stocks: dict[str, Stock], sectors: dict[str, list[str]] | None = None):
         self.stocks = stocks
+        sectors = SECTOR_ALIASES if sectors is None else sectors
+        self._sector_patterns = [(re.compile(_alias_pattern(a), re.IGNORECASE), sector)
+                                 for sector, aliases in sectors.items() for a in aliases]
         patterns = []  # (compiled regex, symbol)
         for s in stocks.values():
             sym = re.escape(s.symbol)
@@ -59,10 +62,23 @@ class Analyzer:
 
     def find_mentions(self, text: str) -> list[Mention]:
         """All non-overlapping stock mentions; longer matches win (so 'engro fertilizer' is EFERT, not ENGROH)."""
+        return self._find(self._patterns, text)
+
+    def find_sector_mentions(self, text: str) -> list[Mention]:
+        """Sectors named outright ('refineries', 'OMCs', 'سیمنٹ'); Mention.symbol holds the sector name.
+
+        Sector words inside a stock's name ('Lucky Cement', 'Engro Fertilizer') don't count: that is the stock.
+        """
+        stocks = self.find_mentions(text)
+        return [m for m in self._find(self._sector_patterns, text)
+                if all(m.end <= s.start or m.start >= s.end for s in stocks)]
+
+    @staticmethod
+    def _find(patterns, text: str) -> list[Mention]:
         if not text:
             return []
         candidates = []
-        for rx, symbol in self._patterns:
+        for rx, symbol in patterns:
             for m in rx.finditer(text):
                 candidates.append((m.start(), m.end(), symbol))
         candidates.sort(key=lambda c: (-(c[1] - c[0]), c[0]))
@@ -104,12 +120,43 @@ def sentence_sentiment(text: str, start: int, end: int) -> int:
     return (score > 0) - (score < 0)
 
 
-def analyze_video(analyzer: Analyzer, title: str, description: str, transcript: str | None) -> dict[str, dict]:
-    """Per-symbol summary for one video: mention counts by source and net sentiment."""
+def boilerplate_lines(descriptions: list[str], share: float = 0.5, min_videos: int = 3) -> set[str]:
+    """Description lines a channel repeats under most of its videos (links, hashtag blocks, disclaimers).
+
+    They say nothing about a particular video, and a '#banking' or '$OGDC' in them would otherwise
+    count for every upload.
+    """
+    if len(descriptions) < min_videos:
+        return set()
+    counts: dict[str, int] = {}
+    for d in descriptions:
+        for line in {ln.strip() for ln in (d or "").splitlines() if ln.strip()}:
+            counts[line] = counts.get(line, 0) + 1
+    need = max(min_videos, share * len(descriptions))
+    return {line for line, n in counts.items() if n >= need}
+
+
+def strip_lines(text: str, lines: set[str]) -> str:
+    if not lines:
+        return text or ""
+    return "\n".join(ln for ln in (text or "").splitlines() if ln.strip() not in lines)
+
+
+def _summarize(find, title: str, description: str, transcript: str | None) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for source, text in (("title", title), ("description", description), ("transcript", transcript)):
-        for m in analyzer.find_mentions(text or ""):
+        for m in find(text or ""):
             row = out.setdefault(m.symbol, {"title": 0, "description": 0, "transcript": 0, "sentiment": 0})
             row[source] += 1
             row["sentiment"] += m.sentiment
     return out
+
+
+def analyze_video(analyzer: Analyzer, title: str, description: str, transcript: str | None) -> dict[str, dict]:
+    """Per-symbol summary for one video: mention counts by source and net sentiment."""
+    return _summarize(analyzer.find_mentions, title, description, transcript)
+
+
+def analyze_video_sectors(analyzer: Analyzer, title: str, description: str, transcript: str | None) -> dict[str, dict]:
+    """Same as analyze_video, keyed by sector, for sectors named outright."""
+    return _summarize(analyzer.find_sector_mentions, title, description, transcript)

@@ -1,13 +1,16 @@
+import argparse
+import contextlib
 import csv
+import io
 import json
 import os
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest import mock
 
 from psx_yt import cli, db, youtube
-from psx_yt.analyzer import Analyzer, analyze_video
+from psx_yt.analyzer import Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines
 from psx_yt.tickers import load_tickers
 from psx_yt.trends import compute, tone_label, trend_label
 from psx_yt.youtube import parse_rss, resolve_channel
@@ -68,6 +71,29 @@ class SentimentTests(unittest.TestCase):
         self.assertNotIn("PPL", out)  # untagged PPL is ambiguous
 
 
+class SectorTests(unittest.TestCase):
+    def sectors(self, text):
+        return {k: v["sentiment"] for k, v in analyze_video_sectors(ANALYZER, text, "", None).items()}
+
+    def test_named_sectors(self):
+        self.assertEqual(self.sectors("Selling from Banks | PSX Pulse"), {"Banks": -1})
+        self.assertEqual(self.sectors("Refineries in Momentum"), {"Refinery": 1})
+        self.assertEqual(self.sectors("E&P stocks rally, avoid OMCs"), {"Oil & Gas E&P": 1, "Oil & Gas Marketing": -1})
+        self.assertEqual(self.sectors("سیمنٹ سیکٹر میں تیزی"), {"Cement": 1})
+
+    def test_not_sectors(self):
+        self.assertEqual(self.sectors("State Bank keeps policy rate, power to the people"), {})
+        self.assertEqual(self.sectors("Lucky Cement results"), {})  # the stock, not the sector
+
+    def test_boilerplate_lines(self):
+        shared = "Join our WhatsApp group\n#psx #banking #trading"
+        descs = [shared, shared + "\nOGDC results today", shared, "Something else"]
+        lines = boilerplate_lines(descs)
+        self.assertEqual(lines, {"Join our WhatsApp group", "#psx #banking #trading"})
+        self.assertEqual(strip_lines(descs[1], lines), "OGDC results today")
+        self.assertEqual(boilerplate_lines(descs[:2]), set())  # too few videos to tell
+
+
 RSS = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/"
       xmlns="http://www.w3.org/2005/Atom">
@@ -107,6 +133,51 @@ class YouTubeTests(unittest.TestCase):
                              ("youtube.com/user/SomeName", "https://www.youtube.com/user/SomeName")):
                 self.assertEqual(resolve_channel(ref), ("UCabcdefghijklmnopqrstuv", "Pakistan Stock Exchange & Co"))
                 get.assert_called_with(url)
+
+
+class CaptionTests(unittest.TestCase):
+    def test_transcript_status(self):
+        def err(*names):  # an exception whose class hierarchy has these names
+            cls = Exception
+            for n in reversed(names):
+                cls = type(n, (cls,), {})
+            return cls()
+        self.assertEqual(youtube.transcript_status(err("TranscriptsDisabled", "CouldNotRetrieveTranscript")), "none")
+        self.assertEqual(youtube.transcript_status(err("IpBlocked", "RequestBlocked")), "blocked")
+        self.assertEqual(youtube.transcript_status(ConnectionError()), "error")
+
+    def test_fetch_transcripts_keeps_blocked_and_new_videos_for_retry(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        new = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        for vid, ts in (("ok", "2026-01-01T00:00:00Z"), ("none", "2026-01-01T00:00:00Z"),
+                        ("none_new", new), ("blocked", "2026-01-01T00:00:00Z"), ("old_empty", "2026-01-01T00:00:00Z")):
+            db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": vid, "published_at": ts})
+        conn.execute("UPDATE videos SET transcript = '' WHERE id = 'old_empty'")
+        results = {"ok": ("OGDC buy", "ok", ""), "none": (None, "none", "NoTranscriptFound"),
+                   "none_new": (None, "none", "NoTranscriptFound"), "blocked": (None, "blocked", "IpBlocked"),
+                   "old_empty": ("HUBC", "ok", "")}
+        with mock.patch.object(youtube, "fetch_transcript", side_effect=lambda vid: results[vid]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            cli.fetch_transcripts(conn)
+        stored = dict(conn.execute("SELECT id, transcript FROM videos").fetchall())
+        self.assertEqual(stored, {"ok": "OGDC buy", "none": "", "none_new": None, "blocked": None, "old_empty": ""})
+        self.assertIn("Captions: 1 ok, 2 none, 1 blocked, 0 error", out.getvalue())
+        self.assertIn("blocked: blocked (IpBlocked)", out.getvalue())
+        with mock.patch.object(youtube, "fetch_transcript", side_effect=lambda vid: results[vid]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            cli.fetch_transcripts(conn, retry=True)
+        self.assertEqual(conn.execute("SELECT transcript FROM videos WHERE id = 'old_empty'").fetchone()[0], "HUBC")
+
+    def test_fetch_transcripts_stops_when_blocked(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        for i in range(10):
+            db.upsert_video(conn, {"id": f"v{i}", "channel_id": "UC1", "title": "t", "published_at": "2026-01-01T00:00:00Z"})
+        calls = mock.Mock(return_value=(None, "blocked", "IpBlocked"))
+        with mock.patch.object(youtube, "fetch_transcript", calls), contextlib.redirect_stdout(io.StringIO()):
+            cli.fetch_transcripts(conn)
+        self.assertEqual(calls.call_count, cli.MAX_FAILURES_IN_A_ROW)
 
 
 class TrendTests(unittest.TestCase):
@@ -159,6 +230,24 @@ class TrendTests(unittest.TestCase):
         self.assertEqual((ogdc["tone_previous"], ogdc["tone_recent"], ogdc["tone_change"], ogdc["tone_trend"]),
                          (-1.0, 0.5, 1.5, "IMPROVING"))
 
+    def test_compute_sectors(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        vids = [("v1", "Selling from Banks", ""), ("v2", "Buy MEBL now", ""), ("v3", "OGDC update", ""),
+                ("v4", "Weekly", "Join us\n#banking"), ("v5", "Daily", "Join us\n#banking"),
+                ("v6", "Recap", "Join us\n#banking")]
+        for vid, title, desc in vids:
+            db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "description": desc,
+                                   "published_at": "2026-10-28T10:00:00Z"})
+        conn.commit()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_analyze(argparse.Namespace(tickers=None), conn)
+        sectors = {s["sector"]: s for s in compute(conn, load_tickers(), today=date(2026, 10, 29))["sectors"]}
+        banks = sectors["Banks"]  # the shared "#banking" description line is ignored
+        self.assertEqual((banks["videos"], banks["direct_videos"], banks["bullish"], banks["bearish"], banks["stocks"]),
+                         (2, 1, 1, 1, ["MEBL"]))
+        self.assertEqual((sectors["Oil & Gas E&P"]["videos"], sectors["Oil & Gas E&P"]["direct_videos"]), (1, 0))
+
 
 class ExportTests(unittest.TestCase):
     def test_export_csv_and_json(self):
@@ -178,6 +267,10 @@ class ExportTests(unittest.TestCase):
             self.assertEqual((rows["OGDC"]["bullish"], rows["PSO"]["bearish"]), ("1", "1"))
             self.assertEqual(rows["OGDC"]["channels"], "Chan 1")
             self.assertEqual(rows["OGDC"]["tone_trend"], "-")
+            cli.main(["--db", dbf, "export", "--sectors", "-o", os.path.join(tmp, "sectors.csv")])
+            with open(os.path.join(tmp, "sectors.csv"), encoding="utf-8-sig") as f:
+                secs = {r["sector"]: r for r in csv.DictReader(f)}
+            self.assertEqual((secs["Oil & Gas E&P"]["stocks"], secs["Oil & Gas Marketing"]["bearish"]), ("OGDC", "1"))
             with open(os.path.join(tmp, "out.json"), encoding="utf-8") as f:
                 self.assertEqual(len(json.load(f)["stocks"]), 2)
 

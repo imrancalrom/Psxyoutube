@@ -1,8 +1,8 @@
 # Daily fetch + analyze + report.
 #
-# The database lives on the `data` branch (with the latest report.html and psx_buzz.csv). Each run restores it,
-# adds new videos, and replaces that branch with a single fresh commit: the database already holds the full
-# history, so keeping one commit per day would only bloat the repository with old copies of it.
+# The database lives on the `data` branch, with the latest report.html, psx_buzz.csv and psx_sectors.csv.
+# Each run restores it, adds new videos, and replaces that branch with a single fresh commit: the database
+# already holds the full history, so keeping one commit per day would only bloat the repository with old copies.
 #
 # Setup: commit a channels.txt (see channels.example.txt). Optional:
 #   secret   YOUTUBE_API_KEY      full upload history instead of the latest ~15 videos per channel
@@ -16,6 +16,10 @@ on:
     inputs:
       transcripts:
         description: Also fetch captions
+        type: boolean
+        default: false
+      retry_captions:
+        description: Retry videos earlier marked as having no captions (needs captions on)
         type: boolean
         default: false
 
@@ -62,12 +66,17 @@ jobs:
 
       - name: Fetch, analyze and report
         run: |
+          set -o pipefail  # so a failing run isn't hidden by tee
           flags=""
           if [ "${{ inputs.transcripts }}" = "true" ] || [ "${{ vars.FETCH_TRANSCRIPTS }}" = "true" ]; then
             flags="--transcripts"
+            if [ "${{ inputs.retry_captions }}" = "true" ]; then
+              flags="$flags --retry-captions"
+            fi
           fi
           python -m psx_yt --db out/psx_yt.db run $flags -o out/report.html | tee out/summary.txt
           python -m psx_yt --db out/psx_yt.db export -o out/psx_buzz.csv
+          python -m psx_yt --db out/psx_yt.db export --sectors -o out/psx_sectors.csv
           { echo '```'; cat out/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -76,6 +85,7 @@ jobs:
           path: |
             out/report.html
             out/psx_buzz.csv
+            out/psx_sectors.csv
           retention-days: 30
 
       - name: Save database to the data branch
@@ -83,7 +93,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git switch --orphan data-new
-          mv out/psx_yt.db out/report.html out/psx_buzz.csv .
-          git add -f psx_yt.db report.html psx_buzz.csv
+          mv out/psx_yt.db out/report.html out/psx_buzz.csv out/psx_sectors.csv .
+          git add -f psx_yt.db report.html psx_buzz.csv psx_sectors.csv
           git commit -q -m "Data as of $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push --force origin data-new:data
