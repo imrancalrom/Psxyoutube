@@ -37,6 +37,11 @@ class DetectionTests(unittest.TestCase):
     def test_no_partial_words(self):
         self.assertEqual(symbols("SYSTEMATIC approach, HUBCO"), ["HUBC"])
 
+    def test_similar_names(self):
+        self.assertEqual(symbols("Atlas Honda and Honda Atlas"), ["ATLH", "HCAR"])
+        self.assertEqual(symbols("Nishat Power vs Nishat Chunian Power"), ["NPL", "NCPL"])
+        self.assertEqual(symbols("TPL Properties and TPL Corp"), ["TPLP", "TPL"])
+
     def test_roman_urdu_and_urdu(self):
         self.assertEqual(symbols("میزان بینک اور حب پاور"), ["MEBL", "HUBC"])
 
