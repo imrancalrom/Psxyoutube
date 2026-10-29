@@ -132,13 +132,14 @@ _STOCKS = [
     ("JSCL", "Jahangir Siddiqui & Co", "Investment", ["jahangir siddiqui"], False),
 ]
 
-# Words that name a whole sector. Kept specific on purpose: no bare "bank" (State Bank), "power" or "tech".
+# Words that name a whole sector. Kept specific on purpose: no bare "bank" (State Bank), "banking" (digital
+# banking), "real estate" (property as an investment), "power" or "tech".
 # Generic "oil & gas" talk on PSX is mostly about the E&P names, so it counts there.
 SECTOR_ALIASES = {
-    "Banks": ["banks", "banking", "banking sector", "bank stocks", "بینکنگ", "بینکس"],
+    "Banks": ["banks", "banking sector", "banking stocks", "bank stocks", "بینکنگ سیکٹر", "بینکس"],
     "Cement": ["cement", "cement sector", "cements", "سیمنٹ"],
     "Oil & Gas E&P": ["E&P", "E & P", "exploration and production", "exploration & production", "oil & gas",
-                      "oil and gas", "oil sector", "آئل اینڈ گیس"],
+                      "oil and gas", "oil sector", "oil exploration", "exploration sector", "آئل اینڈ گیس"],
     "Oil & Gas Marketing": ["OMC", "OMCs", "oil marketing", "oil marketing companies", "gas utilities"],
     "Refinery": ["refinery", "refineries", "refining", "ریفائنری"],
     "Power": ["power sector", "power stocks", "IPP", "IPPs", "power companies"],
@@ -153,7 +154,7 @@ SECTOR_ALIASES = {
     "Glass": ["glass sector"],
     "Paper & Board": ["paper sector", "packaging sector"],
     "Tobacco": ["tobacco"],
-    "Real Estate": ["real estate", "REIT", "REITs"],
+    "Real Estate": ["real estate sector", "real estate stocks", "REIT", "REITs"],
 }
 # fmt: on
 

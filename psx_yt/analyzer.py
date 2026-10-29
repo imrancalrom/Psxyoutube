@@ -136,6 +136,26 @@ def boilerplate_lines(descriptions: list[str], share: float = 0.5, min_videos: i
     return {line for line, n in counts.items() if n >= need}
 
 
+_PAYMENT = re.compile(r"\b(?:iban|title of account|account\s*(?:no\b|number|title|details|#|:)|a/c\b)", re.IGNORECASE)
+_ACCOUNT_NUMBER = re.compile(r"\b(?:iban|account\s*(?:no\b|number|#|:)|a/c\b)", re.IGNORECASE)
+
+
+def strip_payment_details(text: str) -> str:
+    """Drop bank-account blocks ('MCB / ACCOUNT: ... / IBAN: ...') that channels post for course fees.
+
+    An account-number line also takes the short line just above it, which usually names the bank and would
+    otherwise count as MCB, BOP, HBL...
+    """
+    lines = (text or "").splitlines()
+    drop = set()
+    for i, ln in enumerate(lines):
+        if _PAYMENT.search(ln):
+            drop.add(i)
+            if _ACCOUNT_NUMBER.search(ln) and i > 0 and len(lines[i - 1].split()) <= 3:
+                drop.add(i - 1)
+    return "\n".join(ln for i, ln in enumerate(lines) if i not in drop)
+
+
 def strip_lines(text: str, lines: set[str]) -> str:
     if not lines:
         return text or ""
