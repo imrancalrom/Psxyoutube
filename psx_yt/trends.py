@@ -48,6 +48,33 @@ def call_label(buy: int, hold: int, sell: int, min_calls: int = 3) -> str:
     return "MIXED"
 
 
+def summary(a: dict) -> str:
+    """One factual line about a stock or sector, built only from its stats (never advice), e.g.
+    '13 videos on 6 channels · new this week (3) · calls split: 2 buy, 2 sell'."""
+    n = lambda count, word: f"{count} {word}{'' if count == 1 else 's'}"
+    coverage = n(a["videos"], "video") + (" on 1 channel only" if a["channel_count"] == 1
+                                          else f" on {a['channel_count']} channels")
+    momentum = {
+        "NEW": (f"new this week ({a['recent']})" if a["recent"] == a["videos"]
+                else f"{a['recent']} this week, none the week before"),
+        "RISING": f"buzz rising ({a['previous']}→{a['recent']} a week)",
+        "FALLING": f"buzz fading ({a['previous']}→{a['recent']} a week)",
+        "STEADY": f"steady ({a['recent']} this week)",
+        "QUIET": "quiet in the last two weeks",
+    }[a["trend"]]
+    counts = ", ".join(f"{c} {w}" for c, w in ((a["bullish"], "buy"), (a["hold"], "hold"), (a["bearish"], "sell")) if c)
+    calls = {
+        "BUY": f"channels lean BUY ({counts})", "SELL": f"channels lean SELL ({counts})",
+        "HOLD": f"mostly HOLD calls ({counts})", "MIXED": f"calls split: {counts}",
+    }.get(a["call"], f"few calls so far ({counts})" if counts else "no buy/sell calls yet")
+    parts = [coverage, momentum, calls]
+    if a["tone_trend"] == "IMPROVING":
+        parts.append("tone improving")
+    elif a["tone_trend"] == "WORSENING":
+        parts.append("tone turning bearish")
+    return " · ".join(parts)
+
+
 def _net(net: int, videos: int, min_videos: int) -> float | None:
     return round(net / videos, 2) if videos >= min_videos else None
 
@@ -114,6 +141,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         both = a["tone_recent"] is not None and a["tone_previous"] is not None
         a["tone_change"] = round(a["tone_recent"] - a["tone_previous"], 2) if both else None
         a["tone_trend"] = tone_label(a["tone_recent"], a["tone_previous"])
+        a["summary"] = summary(a)
         daily = a.pop("daily")
         a["series"] = [daily.get(d, 0) for d in dates]
         a["top_videos"].sort(key=lambda v: (v["published"], v["views"]), reverse=True)

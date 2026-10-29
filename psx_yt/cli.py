@@ -212,10 +212,10 @@ def cmd_report(args, conn):
 
 EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
                  "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "tone_recent", "tone_previous",
-                 "tone_change", "tone_trend", "hold", "call", "views"]
+                 "tone_change", "tone_trend", "hold", "call", "views", "summary"]
 SECTOR_EXPORT_FIELDS = ["sector", "buzz", "videos", "direct_videos", "mentions", "title_videos", "channel_count",
                         "recent", "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score",
-                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "hold", "call", "views"]
+                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "hold", "call", "views", "summary"]
 
 
 def cmd_export(args, conn):

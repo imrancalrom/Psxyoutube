@@ -70,6 +70,9 @@ tr.row:hover { background: var(--bg); }
 .pos { color: var(--bull); } .neg { color: var(--bear); }
 .foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
 .section { margin-bottom: 16px; }
+tr.has-note td { border-bottom: 0; padding-bottom: 2px; }
+tr.note td { padding-top: 0; color: var(--muted); font-size: 12px; white-space: normal; }
+tr.row.note:hover { background: none; }
 </style>
 </head>
 <body>
@@ -124,7 +127,7 @@ tr.row:hover { background: var(--bg); }
       </tr></thead>
       <tbody></tbody>
     </table></div>
-    <div class="foot">Click a row to see the videos. Buzz weights each video by its views and doubles it when the stock is in the title.
+    <div class="foot">The grey line under each stock sums up its numbers for the chosen period. Click a row to see the videos. Buzz weights each video by its views and doubles it when the stock is in the title.
       Tone 7d compares net tone (−1 all bearish … +1 all bullish) in the last 7 days with the 7 before; it needs 3+ videos in each.
       YouTube call counts the videos that said buy, hold or sell about a stock: BUY, HOLD or SELL when one call has at least half
       of 3+ calls, MIXED otherwise. It reports what the tracked channels said, detected from keywords (English, Roman Urdu, Urdu);
@@ -224,7 +227,7 @@ function videoList(s) {
 }
 
 // A sortable table whose rows expand to show their videos. rows() is read on every render, so it follows the period.
-function table({ id, rows, key, cells, empty, filter = () => true, onRender = () => {} }) {
+function table({ id, rows, key, cells, empty, filter = () => true, onRender = () => {}, note = null }) {
   const el = document.getElementById(id), cols = el.querySelectorAll("thead th").length;
   let sortKey = "buzz", sortDir = -1;
   const open = new Set();
@@ -236,7 +239,8 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
       return (x > y ? 1 : x < y ? -1 : 0) * sortDir;
     });
     el.querySelector("tbody").innerHTML = shown.map(s =>
-      `<tr class="row" data-s="${esc(s[key])}">${cells(s)}</tr>` +
+      `<tr class="row${note ? " has-note" : ""}" data-s="${esc(s[key])}">${cells(s)}</tr>` +
+      (note ? `<tr class="row note" data-s="${esc(s[key])}"><td colspan="${cols}">${esc(note(s))}</td></tr>` : "") +
       (open.has(s[key]) ? `<tr class="detail"><td colspan="${cols}">${videoList(s)}</td></tr>` : "")
     ).join("") || `<tr><td colspan="${cols}">${empty}</td></tr>`;
     onRender(shown.length, all.length);
@@ -262,7 +266,7 @@ function stockFilter(s) {
 }
 const renderStocks = table({
   id: "tbl", rows: () => DATA.stocks, key: "symbol", empty: "No stocks match these filters in this period.",
-  filter: stockFilter,
+  filter: stockFilter, note: s => s.summary,
   onRender: (shown, all) => { document.getElementById("count").textContent = `Showing ${shown} of ${all} stocks`; },
   cells: s => `<td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
     <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
