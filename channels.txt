@@ -2,3 +2,7 @@
 # One per line: an @handle, a channel URL (/@name, /channel/UC..., /c/name, /user/name) or a UC... channel id.
 # Stockify
 https://www.youtube.com/@stockifyyltd
+# Iftekhar Wasfi
+https://www.youtube.com/@iftekharwasfi786
+# Kamran Memon Bawany
+https://www.youtube.com/@kamranmemonbawanyofficial2733
