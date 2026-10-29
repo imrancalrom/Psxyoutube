@@ -26,6 +26,15 @@ CREATE TABLE IF NOT EXISTS mentions (
     sentiment INTEGER NOT NULL,
     PRIMARY KEY (video_id, symbol)
 );
+CREATE TABLE IF NOT EXISTS sector_mentions (
+    video_id TEXT NOT NULL REFERENCES videos(id),
+    sector TEXT NOT NULL,
+    in_title INTEGER NOT NULL,
+    in_description INTEGER NOT NULL,
+    in_transcript INTEGER NOT NULL,
+    sentiment INTEGER NOT NULL,
+    PRIMARY KEY (video_id, sector)
+);
 CREATE INDEX IF NOT EXISTS idx_videos_published ON videos(published_at);
 """
 
@@ -57,5 +66,13 @@ def upsert_video(conn, v: dict):
     )
 
 
-def video_ids_without_transcript(conn) -> list[str]:
-    return [r["id"] for r in conn.execute("SELECT id FROM videos WHERE transcript IS NULL")]
+def videos_without_transcript(conn) -> list[sqlite3.Row]:
+    """Videos whose captions have not been fetched yet (transcript NULL; "" means the video has none), newest first."""
+    return conn.execute(
+        "SELECT id, published_at FROM videos WHERE transcript IS NULL ORDER BY published_at DESC"
+    ).fetchall()
+
+
+def reset_empty_transcripts(conn) -> int:
+    """Mark videos recorded as caption-less for another try; returns how many."""
+    return conn.execute("UPDATE videos SET transcript = NULL WHERE transcript = ''").rowcount

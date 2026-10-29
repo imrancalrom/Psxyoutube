@@ -133,17 +133,35 @@ def fetch_api(channel_id: str, api_key: str, max_videos: int = 200) -> tuple[str
     return title, videos
 
 
-def fetch_transcript(video_id: str, languages=("ur", "en", "hi")) -> str | None:
-    """Caption text for a video, or None if unavailable / library not installed."""
+# youtube-transcript-api errors that mean the video has no usable captions (as opposed to a block or network error).
+NO_CAPTIONS = {"TranscriptsDisabled", "NoTranscriptFound", "NoTranscriptAvailable", "VideoUnavailable", "VideoUnplayable",
+               "AgeRestricted", "InvalidVideoId"}
+BLOCKED = {"RequestBlocked", "IpBlocked", "TooManyRequests", "PoTokenRequired"}
+
+
+def transcript_status(exc: Exception) -> str:
+    """'none' when the video has no captions, 'blocked' when YouTube refused us, 'error' otherwise."""
+    names = {c.__name__ for c in type(exc).__mro__}
+    if names & BLOCKED:
+        return "blocked"
+    if names & NO_CAPTIONS:
+        return "none"
+    return "error"
+
+
+def fetch_transcript(video_id: str, languages=("ur", "en", "hi")) -> tuple[str | None, str, str]:
+    """(caption text, status, detail) for a video. status is 'ok', 'none' (no captions), 'blocked', 'error',
+    or 'missing-lib' when youtube-transcript-api is not installed; text is None unless status is 'ok';
+    detail names the error."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
     except ImportError:
-        return None
+        return None, "missing-lib", ""
     try:
         if hasattr(YouTubeTranscriptApi, "get_transcript"):  # library < 1.0
             parts = YouTubeTranscriptApi.get_transcript(video_id, languages=list(languages))
-            return " ".join(p["text"] for p in parts)
+            return " ".join(p["text"] for p in parts), "ok", ""
         fetched = YouTubeTranscriptApi().fetch(video_id, languages=list(languages))
-        return " ".join(s.text for s in fetched)
-    except Exception:
-        return None
+        return " ".join(s.text for s in fetched), "ok", ""
+    except Exception as e:
+        return None, transcript_status(e), type(e).__name__

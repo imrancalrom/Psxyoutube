@@ -59,6 +59,7 @@ tr.row:hover { background: var(--bg); }
 .detail a { color: var(--accent); }
 .pos { color: var(--bull); } .neg { color: var(--bear); }
 .foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
+.section { margin-bottom: 16px; }
 </style>
 </head>
 <body>
@@ -69,6 +70,20 @@ tr.row:hover { background: var(--bg); }
   <div class="grid">
     <div class="card"><h2>Daily videos mentioning the top 5 stocks</h2><div class="chart"><canvas id="line"></canvas></div></div>
     <div class="card"><h2>Buzz by sector</h2><div class="chart"><canvas id="sectors"></canvas></div></div>
+  </div>
+  <div class="card section">
+    <h2>Sectors</h2>
+    <div class="tablewrap"><table id="sectbl">
+      <thead><tr>
+        <th data-k="sector">Sector</th><th data-k="buzz" class="num">Buzz</th><th data-k="videos" class="num">Videos</th>
+        <th data-k="direct_videos" class="num" title="Videos naming the sector itself, not just one of its stocks">Named</th>
+        <th data-k="recent" class="num">Last 7d</th><th data-k="previous" class="num">Prev 7d</th><th data-k="trend">Trend</th>
+        <th data-k="sentiment_score">Sentiment</th><th data-k="tone_change" title="Net tone, previous 7 days to last 7 days">Tone 7d</th>
+        <th>Stocks mentioned</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="foot">A sector counts every video that names it ("refineries", "OMCs", "سیمنٹ") or mentions one of its stocks.</div>
   </div>
   <div class="card">
     <h2>All stocks discussed</h2>
@@ -140,7 +155,6 @@ if (window.Chart) {
   });
 }
 
-let sortKey = "buzz", sortDir = -1, open = new Set();
 function tone(s) {
   if (s.tone_change === null) {
     const one = s.tone_recent ?? s.tone_previous;
@@ -156,39 +170,58 @@ function sbar(s) {
     `<span style="width:${w("neutral")};background:var(--neutral)"></span>` +
     `<span style="width:${w("bearish")};background:var(--bear)"></span></div>`;
 }
-function render() {
-  const q = document.getElementById("q").value.toLowerCase();
-  const rows = S.filter(s => !q || (s.symbol + " " + s.name + " " + s.sector).toLowerCase().includes(q))
-    .sort((a, b) => {
+function videoList(s) {
+  return `<strong>Channels:</strong> ${s.channels.map(esc).join(", ")}<ul>` +
+    s.top_videos.map(v => `<li>${v.published} · <a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a>
+      — ${esc(v.channel)} · ${fmt(v.views)} views
+      <span class="${v.sentiment > 0 ? "pos" : v.sentiment < 0 ? "neg" : ""}">${v.sentiment > 0 ? "bullish" : v.sentiment < 0 ? "bearish" : "neutral"}</span></li>`).join("") +
+    `</ul>`;
+}
+
+// A sortable table whose rows expand to show their videos.
+function table({ id, rows, key, cells, empty, filter = () => true }) {
+  const el = document.getElementById(id), cols = el.querySelectorAll("thead th").length;
+  let sortKey = "buzz", sortDir = -1;
+  const open = new Set();
+  function render() {
+    const shown = rows.filter(filter).sort((a, b) => {
       const x = a[sortKey], y = b[sortKey];
-      if (x === null || y === null) return (x === null) - (y === null);  // stocks without a value always last
+      if (x === null || y === null) return (x === null) - (y === null);  // rows without a value always last
       return (x > y ? 1 : x < y ? -1 : 0) * sortDir;
     });
-  document.querySelector("#tbl tbody").innerHTML = rows.map(s => {
-    let html = `<tr class="row" data-s="${esc(s.symbol)}">
-      <td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
-      <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
-      <td class="num">${s.channel_count}</td><td class="num">${s.recent}</td><td class="num">${s.previous}</td>
-      <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${sbar(s)}</td><td>${tone(s)}</td><td class="num">${fmt(s.views)}</td></tr>`;
-    if (open.has(s.symbol)) {
-      html += `<tr class="detail"><td colspan="11"><strong>Channels:</strong> ${s.channels.map(esc).join(", ")}<ul>` +
-        s.top_videos.map(v => `<li>${v.published} · <a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a>
-          — ${esc(v.channel)} · ${fmt(v.views)} views
-          <span class="${v.sentiment > 0 ? "pos" : v.sentiment < 0 ? "neg" : ""}">${v.sentiment > 0 ? "bullish" : v.sentiment < 0 ? "bearish" : "neutral"}</span></li>`).join("") +
-        `</ul></td></tr>`;
-    }
-    return html;
-  }).join("") || `<tr><td colspan="11">No stock mentions in this period.</td></tr>`;
+    el.querySelector("tbody").innerHTML = shown.map(s =>
+      `<tr class="row" data-s="${esc(s[key])}">${cells(s)}</tr>` +
+      (open.has(s[key]) ? `<tr class="detail"><td colspan="${cols}">${videoList(s)}</td></tr>` : "")
+    ).join("") || `<tr><td colspan="${cols}">${empty}</td></tr>`;
+  }
+  el.querySelector("tbody").addEventListener("click", e => {
+    const tr = e.target.closest("tr.row"); if (!tr) return;
+    const k = tr.dataset.s; open.has(k) ? open.delete(k) : open.add(k); render();
+  });
+  el.querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.k; sortDir = sortKey === k ? -sortDir : -1; sortKey = k; render();
+  }));
+  render();
+  return render;
 }
-document.querySelector("#tbl tbody").addEventListener("click", e => {
-  const tr = e.target.closest("tr.row"); if (!tr) return;
-  const s = tr.dataset.s; open.has(s) ? open.delete(s) : open.add(s); render();
+
+const q = document.getElementById("q");
+const renderStocks = table({
+  id: "tbl", rows: S, key: "symbol", empty: "No stock mentions in this period.",
+  filter: s => !q.value || (s.symbol + " " + s.name + " " + s.sector).toLowerCase().includes(q.value.toLowerCase()),
+  cells: s => `<td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
+    <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
+    <td class="num">${s.channel_count}</td><td class="num">${s.recent}</td><td class="num">${s.previous}</td>
+    <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${sbar(s)}</td><td>${tone(s)}</td><td class="num">${fmt(s.views)}</td>`,
 });
-document.querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
-  const k = th.dataset.k; sortDir = sortKey === k ? -sortDir : -1; sortKey = k; render();
-}));
-document.getElementById("q").addEventListener("input", render);
-render();
+q.addEventListener("input", renderStocks);
+table({
+  id: "sectbl", rows: DATA.sectors, key: "sector", empty: "No sectors discussed in this period.",
+  cells: s => `<td class="sym">${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
+    <td class="num">${s.direct_videos}</td><td class="num">${s.recent}</td><td class="num">${s.previous}</td>
+    <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${sbar(s)}</td><td>${tone(s)}</td>
+    <td class="name">${s.stocks.map(esc).join(" ") || "–"}</td>`,
+});
 </script>
 </body>
 </html>

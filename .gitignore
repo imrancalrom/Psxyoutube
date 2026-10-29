@@ -6,3 +6,4 @@ tickers_extra.csv
 .venv/
 psx_buzz.csv
 psx_buzz.json
+psx_sectors.csv
