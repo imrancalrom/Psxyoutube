@@ -24,11 +24,30 @@ def trend_label(recent: int, previous: int) -> str:
     return "STEADY"
 
 
-def compute(conn, stocks: dict[str, Stock], days: int = 30, window: int = 7, today: date | None = None) -> dict:
+def tone_label(recent: float | None, previous: float | None, min_change: float = 0.25) -> str:
+    """Week-over-week change in net tone (each -1..+1); '-' when either week has too few videos to tell."""
+    if recent is None or previous is None:
+        return "-"
+    change = recent - previous
+    if change >= min_change:
+        return "IMPROVING"
+    if change <= -min_change:
+        return "WORSENING"
+    return "STABLE"
+
+
+def _net(net: int, videos: int, min_videos: int) -> float | None:
+    return round(net / videos, 2) if videos >= min_videos else None
+
+
+def compute(conn, stocks: dict[str, Stock], days: int = 30, window: int = 7, today: date | None = None,
+            min_tone_videos: int = 3) -> dict:
     """Stats for every stock mentioned in the last `days` days.
 
     buzz     = sum over videos of (2 if in title else 1) * (1 + log10(1 + views))
     momentum = videos in the last `window` days vs the `window` days before that
+    tone     = net sentiment (bullish - bearish) / videos in each of those two windows, and its change;
+               a window needs `min_tone_videos` videos to get a tone
     """
     today = today or datetime.now(timezone.utc).date()
     start = today - timedelta(days=days - 1)
@@ -51,7 +70,7 @@ def compute(conn, stocks: dict[str, Stock], days: int = 30, window: int = 7, tod
             "sector": stock.sector if stock else "Other",
             "videos": 0, "mentions": 0, "title_videos": 0, "views": 0, "buzz": 0.0,
             "bullish": 0, "bearish": 0, "neutral": 0,
-            "recent": 0, "previous": 0,
+            "recent": 0, "previous": 0, "net_recent": 0, "net_previous": 0,
             "channels": set(), "daily": defaultdict(int), "top_videos": [],
         })
         weight = (2 if r["in_title"] else 1) * (1 + math.log10(1 + (r["views"] or 0)))
@@ -61,17 +80,20 @@ def compute(conn, stocks: dict[str, Stock], days: int = 30, window: int = 7, tod
         a["views"] += r["views"] or 0
         a["buzz"] += weight
         a["bullish" if r["sentiment"] > 0 else "bearish" if r["sentiment"] < 0 else "neutral"] += 1
+        tone = (r["sentiment"] > 0) - (r["sentiment"] < 0)
         age = (today - d).days
         if age < window:
             a["recent"] += 1
+            a["net_recent"] += tone
         elif age < 2 * window:
             a["previous"] += 1
+            a["net_previous"] += tone
         a["channels"].add(r["channel_title"] or r["channel_id"])
         a["daily"][d.isoformat()] += 1
         a["top_videos"].append({
             "id": r["video_id"], "title": r["title"], "channel": r["channel_title"] or r["channel_id"],
             "published": d.isoformat(), "views": r["views"] or 0,
-            "sentiment": (r["sentiment"] > 0) - (r["sentiment"] < 0),
+            "sentiment": tone,
         })
         sector_buzz[a["sector"]] += weight
 
@@ -83,6 +105,11 @@ def compute(conn, stocks: dict[str, Stock], days: int = 30, window: int = 7, tod
         a["buzz"] = round(a["buzz"], 1)
         a["sentiment_score"] = round((a["bullish"] - a["bearish"]) / a["videos"], 2)
         a["trend"] = trend_label(a["recent"], a["previous"])
+        a["tone_recent"] = _net(a.pop("net_recent"), a["recent"], min_tone_videos)
+        a["tone_previous"] = _net(a.pop("net_previous"), a["previous"], min_tone_videos)
+        both = a["tone_recent"] is not None and a["tone_previous"] is not None
+        a["tone_change"] = round(a["tone_recent"] - a["tone_previous"], 2) if both else None
+        a["tone_trend"] = tone_label(a["tone_recent"], a["tone_previous"])
         a["series"] = [a["daily"].get(d, 0) for d in dates]
         del a["daily"]
         a["top_videos"].sort(key=lambda v: (v["published"], v["views"]), reverse=True)

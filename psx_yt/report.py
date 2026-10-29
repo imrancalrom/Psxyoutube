@@ -49,7 +49,9 @@ tr.row:hover { background: var(--bg); }
 .sym { font-weight: 600; }
 .name { color: var(--muted); font-size: 12px; }
 .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor; }
-.RISING, .NEW { color: var(--bull); } .FALLING { color: var(--bear); } .STEADY, .QUIET { color: var(--muted); }
+.RISING, .NEW, .IMPROVING { color: var(--bull); } .FALLING, .WORSENING { color: var(--bear); }
+.STEADY, .QUIET, .STABLE { color: var(--muted); }
+.tone { font-size: 12px; } .tone .d { color: var(--muted); margin-top: 2px; }
 .sbar { display: flex; width: 110px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border); }
 .sbar span { display: block; height: 100%; }
 .detail td { white-space: normal; background: var(--bg); }
@@ -77,11 +79,13 @@ tr.row:hover { background: var(--bg); }
         <th data-k="buzz" class="num">Buzz</th><th data-k="videos" class="num">Videos</th>
         <th data-k="channel_count" class="num">Channels</th><th data-k="recent" class="num">Last 7d</th>
         <th data-k="previous" class="num">Prev 7d</th><th data-k="trend">Trend</th>
-        <th data-k="sentiment_score">Sentiment</th><th data-k="views" class="num">Views</th>
+        <th data-k="sentiment_score">Sentiment</th><th data-k="tone_change" title="Net tone, previous 7 days to last 7 days">Tone 7d</th>
+        <th data-k="views" class="num">Views</th>
       </tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="foot">Click a row to see the videos. Buzz weights each video by its views and doubles it when the stock is in the title.
+      Tone 7d compares net tone (−1 all bearish … +1 all bullish) in the last 7 days with the 7 before; it needs 3+ videos in each.
       Sentiment is keyword based (English, Roman Urdu, Urdu) and is a rough guide, not investment advice.</div>
   </div>
 </main>
@@ -97,11 +101,16 @@ document.getElementById("sub").textContent =
 const S = DATA.stocks;
 const rising = S.filter(s => s.trend === "RISING" || s.trend === "NEW").sort((a, b) => b.recent - a.recent)[0];
 const bull = S.filter(s => s.videos >= 2).sort((a, b) => b.sentiment_score - a.sentiment_score)[0];
+const better = S.filter(s => s.tone_trend === "IMPROVING").sort((a, b) => b.tone_change - a.tone_change)[0];
+const worse = S.filter(s => s.tone_trend === "WORSENING").sort((a, b) => a.tone_change - b.tone_change)[0];
+const signed = n => (n > 0 ? "+" : "") + n.toFixed(2);
 const tiles = [
   ["Stocks discussed", S.length],
   ["Most discussed", S[0] ? S[0].symbol : "-"],
   ["Fastest rising (7d)", rising ? `${rising.symbol} (${rising.previous}→${rising.recent})` : "-"],
-  ["Most bullish (2+ videos)", bull ? `${bull.symbol} (${bull.sentiment_score > 0 ? "+" : ""}${bull.sentiment_score})` : "-"],
+  ["Most bullish (2+ videos)", bull ? `${bull.symbol} (${signed(bull.sentiment_score)})` : "-"],
+  ["Tone improving most (7d)", better ? `${better.symbol} (${signed(better.tone_change)})` : "-"],
+  ["Tone worsening most (7d)", worse ? `${worse.symbol} (${signed(worse.tone_change)})` : "-"],
 ];
 document.getElementById("tiles").innerHTML = tiles.map(([l, v]) =>
   `<div class="tile"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join("");
@@ -132,6 +141,14 @@ if (window.Chart) {
 }
 
 let sortKey = "buzz", sortDir = -1, open = new Set();
+function tone(s) {
+  if (s.tone_change === null) {
+    const one = s.tone_recent ?? s.tone_previous;
+    return `<span class="tone d" title="Needs 3+ videos in each of the last two weeks">${one === null ? "–" : "too few videos"}</span>`;
+  }
+  return `<span class="tone" title="${signed(s.tone_previous)} → ${signed(s.tone_recent)}">` +
+    `<span class="badge ${s.tone_trend}">${s.tone_trend}</span><div class="d">${signed(s.tone_previous)} → ${signed(s.tone_recent)}</div></span>`;
+}
 function sbar(s) {
   const w = k => (100 * s[k] / s.videos).toFixed(0) + "%";
   return `<div class="sbar" title="${s.bullish} bullish · ${s.neutral} neutral · ${s.bearish} bearish">` +
@@ -142,22 +159,26 @@ function sbar(s) {
 function render() {
   const q = document.getElementById("q").value.toLowerCase();
   const rows = S.filter(s => !q || (s.symbol + " " + s.name + " " + s.sector).toLowerCase().includes(q))
-    .sort((a, b) => (a[sortKey] > b[sortKey] ? 1 : a[sortKey] < b[sortKey] ? -1 : 0) * sortDir);
+    .sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      if (x === null || y === null) return (x === null) - (y === null);  // stocks without a value always last
+      return (x > y ? 1 : x < y ? -1 : 0) * sortDir;
+    });
   document.querySelector("#tbl tbody").innerHTML = rows.map(s => {
     let html = `<tr class="row" data-s="${esc(s.symbol)}">
       <td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
       <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
       <td class="num">${s.channel_count}</td><td class="num">${s.recent}</td><td class="num">${s.previous}</td>
-      <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${sbar(s)}</td><td class="num">${fmt(s.views)}</td></tr>`;
+      <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${sbar(s)}</td><td>${tone(s)}</td><td class="num">${fmt(s.views)}</td></tr>`;
     if (open.has(s.symbol)) {
-      html += `<tr class="detail"><td colspan="10"><strong>Channels:</strong> ${s.channels.map(esc).join(", ")}<ul>` +
+      html += `<tr class="detail"><td colspan="11"><strong>Channels:</strong> ${s.channels.map(esc).join(", ")}<ul>` +
         s.top_videos.map(v => `<li>${v.published} · <a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a>
           — ${esc(v.channel)} · ${fmt(v.views)} views
           <span class="${v.sentiment > 0 ? "pos" : v.sentiment < 0 ? "neg" : ""}">${v.sentiment > 0 ? "bullish" : v.sentiment < 0 ? "bearish" : "neutral"}</span></li>`).join("") +
         `</ul></td></tr>`;
     }
     return html;
-  }).join("") || `<tr><td colspan="10">No stock mentions in this period.</td></tr>`;
+  }).join("") || `<tr><td colspan="11">No stock mentions in this period.</td></tr>`;
 }
 document.querySelector("#tbl tbody").addEventListener("click", e => {
   const tr = e.target.closest("tr.row"); if (!tr) return;
