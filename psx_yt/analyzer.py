@@ -8,7 +8,7 @@ from .tickers import SECTOR_ALIASES, Stock
 # Bullish / bearish cue words in English, Roman Urdu and Urdu script.
 BULLISH = [
     r"buy(?:ing)?", r"bullish", r"break\s?out", r"targets?", r"upside", r"accumulat\w*", r"rall(?:y|ies)",
-    r"up\s?trend", r"undervalued", r"dividends?", r"payout", r"rebound\w*", r"multi\s?bagger", r"top pick",
+    r"up\s?trend", r"undervalued", r"dividends?", r"payout", r"rebound\w*", r"multi\s?bagger", r"top picks?",
     r"strong results", r"record profits?", r"outperform\w*", r"all[\s-]time high", r"new high", r"momentum", r"turn\s?around",
     r"khareed\w*", r"kharid\w*", r"tezi", r"taizi", r"munafa", r"خرید\w*", r"تیزی", r"منافع",
 ]

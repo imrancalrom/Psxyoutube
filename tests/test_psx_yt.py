@@ -44,6 +44,8 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(symbols("Atlas Honda and Honda Atlas"), ["ATLH", "HCAR"])
         self.assertEqual(symbols("Nishat Power vs Nishat Chunian Power"), ["NPL", "NCPL"])
         self.assertEqual(symbols("TPL Properties and TPL Corp"), ["TPLP", "TPL"])
+        self.assertEqual(symbols("FCCL, NATF & BOP earnings; MACPAC Films Limited (MACFL) rally"),
+                         ["FCCL", "NATF", "BOP", "MACFL", "MACFL"])
 
     def test_roman_urdu_and_urdu(self):
         self.assertEqual(symbols("میزان بینک اور حب پاور"), ["MEBL", "HUBC"])
@@ -59,6 +61,7 @@ class SentimentTests(unittest.TestCase):
 
     def test_roman_urdu(self):
         self.assertEqual(self.tone("HUBC mein tezi, abhi khareedain"), [("HUBC", 1)])
+        self.assertEqual(self.tone("34:57 Top Picks - (NATF)"), [("NATF", 1)])
         self.assertEqual(self.tone("PSO mein girawat"), [("PSO", -1)])
 
     def test_negation(self):
