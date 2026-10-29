@@ -11,7 +11,7 @@ from unittest import mock
 
 from psx_yt import cli, db, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
-                             strip_payment_details)
+                             strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
 from psx_yt.trends import call_label, compute, tone_label, trend_label
 from psx_yt.youtube import parse_rss, resolve_channel
@@ -114,6 +114,12 @@ class SectorTests(unittest.TestCase):
     def test_general_words_are_not_sectors(self):
         self.assertEqual(self.sectors("Real estate trap vs Roshan Digital Account, digital banking"), {})
         self.assertEqual(self.sectors("REITs and the banking sector"), {"Real Estate": 0, "Banks": 0})
+
+    def test_links_to_other_videos_dropped(self):
+        titles = {title_key("Watch This Before Investing in Any Bank | Meezan Bank")}
+        desc = ("Khaadi IPO explained\n🎥 WATCH OUR MOST USEFUL VIDEOS\n"
+                "▶ Watch This Before Investing in Any Bank | Meezan Bank https://youtu.be/x\nOGDC is also discussed")
+        self.assertEqual(symbols(strip_video_titles(desc, titles)), ["OGDC"])
 
     def test_payment_details_dropped(self):
         desc = ("OGDC results discussed\nBank Account Details:\nTitle of Account: Some Institute\nMCB\n"

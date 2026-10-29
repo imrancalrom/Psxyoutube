@@ -185,6 +185,23 @@ def strip_payment_details(text: str) -> str:
     return "\n".join(ln for i, ln in enumerate(lines) if i not in drop)
 
 
+_URL = re.compile(r"https?://\S+")
+
+
+def title_key(text: str) -> str:
+    """A video title or description line reduced for comparison: no links, bullets, emoji or case."""
+    text = _URL.sub(" ", text)
+    return " ".join(re.sub(r"[^\w\s|&%.,:'?!-]", " ", text).split()).strip(" -|:").lower()
+
+
+def strip_video_titles(text: str, titles: set[str]) -> str:
+    """Drop description lines that are the title of another video on the channel ('WATCH OUR MOST USEFUL VIDEOS'
+    lists): they link elsewhere and say nothing about this video."""
+    if not titles:
+        return text or ""
+    return "\n".join(ln for ln in (text or "").splitlines() if title_key(ln) not in titles)
+
+
 def strip_lines(text: str, lines: set[str]) -> str:
     if not lines:
         return text or ""

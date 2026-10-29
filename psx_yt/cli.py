@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import db, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
-                       strip_payment_details)
+                       strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
 from .tickers import load_tickers
 from .trends import compute
@@ -147,9 +147,13 @@ def cmd_analyze(args, conn):
     for v in videos:
         by_channel.setdefault(v["channel_id"], []).append(v["description"] or "")
     boilerplate = {cid: boilerplate_lines(descs) for cid, descs in by_channel.items()}
+    titles: dict[str, set[str]] = {}
+    for v in videos:
+        titles.setdefault(v["channel_id"], set()).add(title_key(v["title"]))
     for v in videos:
         n_videos += 1
         description = strip_payment_details(strip_lines(v["description"], boilerplate[v["channel_id"]]))
+        description = strip_video_titles(description, titles[v["channel_id"]] - {title_key(v["title"])})
         texts = (v["title"], description, v["transcript"])
         for table, found in (("mentions", analyze_video(analyzer, *texts)),
                              ("sector_mentions", analyze_video_sectors(analyzer, *texts))):
