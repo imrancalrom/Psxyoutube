@@ -52,6 +52,21 @@ A video is marked as having no captions only when YouTube says so and it is more
 take a while). Blocked or failed requests are left for the next run, and fetching stops after 5 failures in a row.
 `--retry-captions` tries the videos marked caption-less again.
 
+#### Captions from your own computer
+
+YouTube blocks caption requests from GitHub's servers (`RequestBlocked`), so the daily workflow can't read them.
+From a normal internet connection, run
+
+```bash
+python scripts/local_captions.py          # add --retry to retry videos marked as having no captions
+```
+
+It downloads the database from the `data` branch, fetches captions for every video still waiting for them,
+re-runs the analysis and pushes the result back to `data` as one fresh commit; the next workflow run carries on
+from there. Your working tree and current branch are left alone. If a workflow run updated `data` while the script
+was working, the push is refused instead of overwriting it (and the workflow likewise won't overwrite a push made
+during its run); just run the script again. `--no-push --keep out/` saves the files locally without pushing.
+
 ## Commands
 
 | Command | Does |
