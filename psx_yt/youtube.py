@@ -6,6 +6,7 @@ Two modes:
 Transcripts are optional and need the `youtube-transcript-api` package.
 """
 
+import html as html_lib
 import re
 import xml.etree.ElementTree as ET
 
@@ -33,15 +34,37 @@ def _get(url: str, **params) -> requests.Response:
     return r
 
 
+def _scrape_channel_page(url: str) -> tuple[str, str | None]:
+    """(channel_id, title or None) from a public channel page."""
+    html = _get(url).text
+    for pattern in (r'"externalId":"(UC[\w-]{22})"', r'<meta itemprop="identifier" content="(UC[\w-]{22})"',
+                    r'"channelId":"(UC[\w-]{22})"'):
+        found = re.search(pattern, html)
+        if found:
+            title = re.search(r'<meta property="og:title" content="([^"]*)"', html)
+            return found.group(1), html_lib.unescape(title.group(1)) if title else None
+    raise YouTubeError(f"Could not find the channel id on {url}")
+
+
 def resolve_channel(ref: str, api_key: str | None = None) -> tuple[str, str | None]:
-    """Turn a channel ID, /channel/ URL, @handle or /@handle URL into (channel_id, title or None)."""
+    """Turn a channel ID, /channel/ URL, @handle, /@handle URL or legacy /c/ or /user/ URL into
+    (channel_id, title or None)."""
     ref = ref.strip()
     m = re.fullmatch(r"(?:https?://(?:www\.|m\.)?youtube\.com/channel/)?(UC[\w-]{22})/?", ref)
     if m:
         return m.group(1), None
+    m = re.search(r"youtube\.com/(c|user)/([^/?#\s]+)", ref)
+    if m:
+        kind, name = m.groups()
+        if api_key and kind == "user":
+            data = _get(f"{API}/channels", part="snippet", forUsername=name, key=api_key).json()
+            if data.get("items"):
+                return data["items"][0]["id"], data["items"][0]["snippet"]["title"]
+        # The API has no lookup for /c/ custom names, so read the channel page.
+        return _scrape_channel_page(f"https://www.youtube.com/{kind}/{name}")
     m = re.search(r"@([\w.\-]+)", ref)
     if not m:
-        raise YouTubeError(f"Don't understand channel reference {ref!r}; use a UC... id or an @handle")
+        raise YouTubeError(f"Don't understand channel reference {ref!r}; use a UC... id, an @handle or a channel URL")
     handle = m.group(1)
     if api_key:
         data = _get(f"{API}/channels", part="snippet", forHandle=handle, key=api_key).json()
@@ -49,14 +72,7 @@ def resolve_channel(ref: str, api_key: str | None = None) -> tuple[str, str | No
             raise YouTubeError(f"No channel found for @{handle}")
         item = data["items"][0]
         return item["id"], item["snippet"]["title"]
-    html = _get(f"https://www.youtube.com/@{handle}").text
-    for pattern in (r'"externalId":"(UC[\w-]{22})"', r'<meta itemprop="identifier" content="(UC[\w-]{22})"',
-                    r'"channelId":"(UC[\w-]{22})"'):
-        found = re.search(pattern, html)
-        if found:
-            title = re.search(r'<meta property="og:title" content="([^"]*)"', html)
-            return found.group(1), title.group(1) if title else None
-    raise YouTubeError(f"Could not find the channel id on the @{handle} page")
+    return _scrape_channel_page(f"https://www.youtube.com/@{handle}")
 
 
 def parse_rss(xml_text: str) -> tuple[str | None, list[dict]]:
