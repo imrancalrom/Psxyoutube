@@ -40,6 +40,7 @@ Re-run `python -m psx_yt run` daily (cron / Task Scheduler) to build up history;
 | `analyze` | detect stock mentions in all stored videos |
 | `top [--days 30] [--limit 25]` | print the most discussed stocks |
 | `report [--days 30] [-o report.html]` | write the HTML dashboard |
+| `export [--days 30] [-o psx_buzz.csv]` | save the leaderboard as CSV (opens in Excel), or everything as `.json` |
 | `run` | fetch + analyze + top + report |
 | `demo [--videos 300]` | synthetic data to try the dashboard |
 
@@ -52,9 +53,11 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    (`OGDC`, `ogdcl`, `Hub Power`, `hubco`, `حب پاور`, ...). Longest match wins, so "Engro Fertilizer" counts as
    EFERT rather than ENGROH. Symbols that are ordinary words (`POWER`, `LUCK`, `PPL`, `UNITY`, `MARI`...) only count
    when tagged (`$LUCK`, `#PPL`) or named in full ("Lucky Cement").
-2. **Sentiment**: the sentence around each mention is scored with bullish/bearish cue words
+2. **Sentiment**: the clause around each mention is scored with bullish/bearish cue words
    (*buy, breakout, target, tezi, khareedain, منافع* vs *sell, crash, avoid, girawat, mandi, نقصان*), with simple
-   negation ("don't buy", "mat khareedo").
+   negation ("don't buy", "mat khareedo"). Clauses are split on commas and contrast words (*but, vs, lekin, magar,
+   لیکن*), so "Buy OGDC, sell PSO" is bullish OGDC and bearish PSO; a clause with no cue words takes the tone of
+   its whole sentence ("OGDC, HUBC and PSO: buy all three").
 3. **Trends** (`psx_yt/trends.py`), over the look-back period:
    - **Buzz**: sum over videos of `(2 if in title else 1) × (1 + log10(1 + views))`
    - **Last 7d vs prev 7d** video counts give the trend label: `NEW`, `RISING` (≥1.5×), `STEADY`, `FALLING` (≤0.67×)
@@ -76,6 +79,6 @@ python -m unittest -v
 
 ## Limits
 
-- Sentiment is keyword based and sentence level: a title like "Buy OGDC, sell PSO" gives both the same tone.
+- Sentiment is keyword based: sarcasm, questions ("should you buy?") and tone carried across sentences are missed.
 - Without transcripts only titles and descriptions are read, so stocks discussed only verbally are missed.
 - Not investment advice.

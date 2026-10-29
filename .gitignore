@@ -4,3 +4,5 @@ report.html
 demo_report.html
 tickers_extra.csv
 .venv/
+psx_buzz.csv
+psx_buzz.json

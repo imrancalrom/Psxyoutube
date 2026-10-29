@@ -1,6 +1,8 @@
 """Command line interface: python -m psx_yt <command> ..."""
 
 import argparse
+import csv
+import json
 import os
 import random
 import sys
@@ -110,6 +112,26 @@ def cmd_report(args, conn):
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks)")
 
 
+EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
+                 "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "views"]
+
+
+def cmd_export(args, conn):
+    """Leaderboard as CSV (one row per stock) or JSON (everything the dashboard uses), picked by file extension."""
+    data = compute(conn, load_tickers(args.tickers), days=args.days)
+    if args.output.lower().endswith(".json"):
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+    else:
+        # utf-8-sig so Excel shows Urdu company names and channel titles correctly.
+        with open(args.output, "w", encoding="utf-8-sig", newline="") as f:
+            w = csv.DictWriter(f, ["rank", *EXPORT_FIELDS, "channels"], extrasaction="ignore")
+            w.writeheader()
+            for i, s in enumerate(data["stocks"], 1):
+                w.writerow({**s, "rank": i, "channels": "; ".join(s["channels"])})
+    print(f"Exported {len(data['stocks'])} stocks to {args.output}")
+
+
 def cmd_run(args, conn):
     cmd_fetch(args, conn)
     cmd_analyze(args, conn)
@@ -207,6 +229,10 @@ def main(argv=None):
     s = sub.add_parser("report", help="Write the HTML dashboard")
     view_opts(s)
     s.set_defaults(func=cmd_report)
+    s = sub.add_parser("export", help="Save the leaderboard as CSV or JSON (by file extension)")
+    s.add_argument("--days", type=int, default=30, help="Look-back period in days")
+    s.add_argument("-o", "--output", default="psx_buzz.csv", help="Output file, .csv or .json")
+    s.set_defaults(func=cmd_export)
     s = sub.add_parser("run", help="fetch + analyze + top + report")
     fetch_opts(s)
     view_opts(s)
