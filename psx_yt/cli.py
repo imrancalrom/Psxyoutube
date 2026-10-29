@@ -1,6 +1,8 @@
 """Command line interface: python -m psx_yt <command> ..."""
 
 import argparse
+import csv
+import json
 import os
 import random
 import sys
@@ -91,15 +93,20 @@ def cmd_analyze(args, conn):
     print(f"Analyzed {n_videos} videos: {n_mentions} stock mentions")
 
 
+def tone_cell(s: dict) -> str:
+    """'IMPROVING +0.40' style summary of the week-over-week tone change."""
+    return s["tone_trend"] if s["tone_change"] is None else f"{s['tone_trend']} {s['tone_change']:+.2f}"
+
+
 def cmd_top(args, conn):
     data = compute(conn, load_tickers(args.tickers), days=args.days)
     print(f"PSX stocks on YouTube, {data['start']} to {data['end']} ({data['video_count']} videos)\n")
     print(f"{'#':>3}  {'Symbol':<8} {'Sector':<20} {'Buzz':>7} {'Videos':>6} {'Chan':>4} "
-          f"{'7d':>4} {'prev':>4}  {'Trend':<8} {'Sent':>5}")
+          f"{'7d':>4} {'prev':>4}  {'Trend':<8} {'Sent':>5}  {'Tone 7d':<16}")
     for i, s in enumerate(data["stocks"][: args.limit], 1):
         print(f"{i:>3}  {s['symbol']:<8} {s['sector'][:20]:<20} {s['buzz']:>7} {s['videos']:>6} "
               f"{s['channel_count']:>4} {s['recent']:>4} {s['previous']:>4}  {s['trend']:<8} "
-              f"{s['sentiment_score']:>+5.2f}")
+              f"{s['sentiment_score']:>+5.2f}  {tone_cell(s):<16}")
     if not data["stocks"]:
         print("No mentions found. Run `fetch` and `analyze` first.")
 
@@ -108,6 +115,27 @@ def cmd_report(args, conn):
     data = compute(conn, load_tickers(args.tickers), days=args.days)
     path = write_report(data, args.output)
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks)")
+
+
+EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
+                 "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "tone_recent", "tone_previous",
+                 "tone_change", "tone_trend", "views"]
+
+
+def cmd_export(args, conn):
+    """Leaderboard as CSV (one row per stock) or JSON (everything the dashboard uses), picked by file extension."""
+    data = compute(conn, load_tickers(args.tickers), days=args.days)
+    if args.output.lower().endswith(".json"):
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+    else:
+        # utf-8-sig so Excel shows Urdu company names and channel titles correctly.
+        with open(args.output, "w", encoding="utf-8-sig", newline="") as f:
+            w = csv.DictWriter(f, ["rank", *EXPORT_FIELDS, "channels"], extrasaction="ignore")
+            w.writeheader()
+            for i, s in enumerate(data["stocks"], 1):
+                w.writerow({**s, "rank": i, "channels": "; ".join(s["channels"])})
+    print(f"Exported {len(data['stocks'])} stocks to {args.output}")
 
 
 def cmd_run(args, conn):
@@ -132,6 +160,7 @@ DEMO_WEIGHTS = {  # symbol: (popularity, bullishness, recent boost)
     "KEL": (4, 0.2, 2.5), "TRG": (4, 0.3, 0.6), "PSO": (4, 0.5, 1.0), "MLCF": (3, 0.6, 1.6),
     "UBL": (3, 0.6, 1.0), "AIRLINK": (3, 0.5, 2.2), "SEARL": (2, 0.4, 0.8), "CNERGY": (2, 0.3, 1.0),
 }
+DEMO_TONE_SHIFT = {"KEL": 0.5, "SYS": 0.4, "HUBC": -0.4, "MEBL": -0.35}  # bullishness change in the last 7 days
 DEMO_NAMES = {"OGDC": "OGDC", "HUBC": "Hub Power", "LUCK": "Lucky Cement", "MEBL": "Meezan Bank",
               "SYS": "Systems Limited", "PPL": "$PPL", "EFERT": "Engro Fertilizer", "FFC": "FFC", "KEL": "K-Electric",
               "TRG": "TRG", "PSO": "PSO", "MLCF": "MLCF", "UBL": "UBL", "AIRLINK": "AIRLINK", "SEARL": "Searle",
@@ -155,7 +184,7 @@ def cmd_demo(args, conn):
             s = rng.choices(syms, weights)[0]
             if s not in picks:
                 picks.append(s)
-        bullish = rng.random() < DEMO_WEIGHTS[picks[0]][1]
+        bullish = rng.random() < DEMO_WEIGHTS[picks[0]][1] + (DEMO_TONE_SHIFT.get(picks[0], 0) if recent else 0)
         pool = [t for t, tone in DEMO_TEMPLATES if tone == 0 or (tone > 0) == bullish]
         title = rng.choice(pool).format(**{k: DEMO_NAMES[s] for k, s in zip("abc", picks)})
         cid, _ = rng.choice(channels)
@@ -207,6 +236,10 @@ def main(argv=None):
     s = sub.add_parser("report", help="Write the HTML dashboard")
     view_opts(s)
     s.set_defaults(func=cmd_report)
+    s = sub.add_parser("export", help="Save the leaderboard as CSV or JSON (by file extension)")
+    s.add_argument("--days", type=int, default=30, help="Look-back period in days")
+    s.add_argument("-o", "--output", default="psx_buzz.csv", help="Output file, .csv or .json")
+    s.set_defaults(func=cmd_export)
     s = sub.add_parser("run", help="fetch + analyze + top + report")
     fetch_opts(s)
     view_opts(s)

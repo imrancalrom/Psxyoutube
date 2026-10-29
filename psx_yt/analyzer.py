@@ -22,6 +22,11 @@ NEGATORS = {"not", "don't", "dont", "never", "no", "mat", "na", "nahi", "nahin"}
 _BULL_RE = re.compile(r"(?<!\w)(?:" + "|".join(BULLISH) + r")(?!\w)", re.IGNORECASE)
 _BEAR_RE = re.compile(r"(?<!\w)(?:" + "|".join(BEARISH) + r")(?!\w)", re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"[.!?\n|۔؟]+")
+# Clause breaks inside a sentence: punctuation and contrast words ("buy OGDC, but sell PSO", "OGDC lo lekin PSO becho").
+_CLAUSE_SPLIT = re.compile(
+    r"[,;:،؛]|\s[-–—]\s|(?<!\w)(?:but|while|whereas|however|vs\.?|versus|lekin|magar|jabke|jabkay|لیکن|مگر|جبکہ)(?!\w)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -79,12 +84,23 @@ def _score(fragment: str) -> int:
     return score
 
 
+def _span(split_re: re.Pattern, text: str, start: int, end: int, lo: int = 0, hi: int | None = None) -> tuple[int, int]:
+    """Bounds of the piece of text[lo:hi], cut by split_re, that contains text[start:end]."""
+    hi = len(text) if hi is None else hi
+    left = max((m.end() for m in split_re.finditer(text, lo, start)), default=lo)
+    right_match = split_re.search(text, end, hi)
+    return left, right_match.start() if right_match else hi
+
+
 def sentence_sentiment(text: str, start: int, end: int) -> int:
-    """Tone of the sentence containing text[start:end]: +1, -1 or 0."""
-    left = max((m.end() for m in _SENTENCE_SPLIT.finditer(text, 0, start)), default=0)
-    right_match = _SENTENCE_SPLIT.search(text, end)
-    right = right_match.start() if right_match else len(text)
-    score = _score(text[left:right])
+    """Tone around text[start:end]: +1, -1 or 0.
+
+    The clause holding the mention decides ("Buy OGDC, sell PSO" is bullish OGDC, bearish PSO); when that clause has
+    no cue words the whole sentence is used ("OGDC, PPL and PSO: buy all three").
+    """
+    s_left, s_right = _span(_SENTENCE_SPLIT, text, start, end)
+    c_left, c_right = _span(_CLAUSE_SPLIT, text, start, end, s_left, s_right)
+    score = _score(text[c_left:c_right]) or _score(text[s_left:s_right])
     return (score > 0) - (score < 0)
 
 
