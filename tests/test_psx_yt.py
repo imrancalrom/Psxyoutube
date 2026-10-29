@@ -10,7 +10,8 @@ from datetime import date, datetime, timezone
 from unittest import mock
 
 from psx_yt import cli, db, youtube
-from psx_yt.analyzer import Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines
+from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
+                             strip_payment_details)
 from psx_yt.tickers import load_tickers
 from psx_yt.trends import compute, tone_label, trend_label
 from psx_yt.youtube import parse_rss, resolve_channel
@@ -89,6 +90,17 @@ class SectorTests(unittest.TestCase):
     def test_not_sectors(self):
         self.assertEqual(self.sectors("State Bank keeps policy rate, power to the people"), {})
         self.assertEqual(self.sectors("Lucky Cement results"), {})  # the stock, not the sector
+
+    def test_general_words_are_not_sectors(self):
+        self.assertEqual(self.sectors("Real estate trap vs Roshan Digital Account, digital banking"), {})
+        self.assertEqual(self.sectors("REITs and the banking sector"), {"Real Estate": 0, "Banks": 0})
+
+    def test_payment_details_dropped(self):
+        desc = ("OGDC results discussed\nBank Account Details:\nTitle of Account: Some Institute\nMCB\n"
+                "ACCOUNT: 0000\nIBAN: PK00MUCB0000\nBOP\nAccount No: 0000\nAccount opening in PSX via Roshan Digital Account")
+        kept = strip_payment_details(desc)
+        self.assertEqual(symbols(kept), ["OGDC"])
+        self.assertIn("Account opening in PSX via Roshan Digital Account", kept)
 
     def test_boilerplate_lines(self):
         shared = "Join our WhatsApp group\n#psx #banking #trading"

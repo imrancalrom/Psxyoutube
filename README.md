@@ -92,9 +92,10 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    when tagged (`$LUCK`, `#PPL`) or named in full ("Lucky Cement").
    **Sectors** are also picked up when named outright: *banks, cement, E&P, oil & gas, OMCs, refineries, IPPs,
    fertilizer, autos, pharma, textile, FMCG, steel...* plus Urdu (`سیمنٹ`, `ریفائنری`, `کھاد`...). Words that are too
-   general are left out (a bare "bank" would catch "State Bank"), and a sector word inside a stock's name
+   general are left out (a bare "bank" would catch "State Bank", "real estate" usually means property), and a sector word inside a stock's name
    ("Lucky Cement") counts as the stock. Description lines a channel repeats under most of its videos (links, hashtag
-   blocks like `#banking`) are ignored, so they don't count for every upload.
+   blocks like `#banking`) are ignored, so they don't count for every upload, and so are bank-account details
+   posted for course fees ("MCB / ACCOUNT: ... / IBAN: ..."), which would otherwise count as MCB, BOP...
 2. **Sentiment**: the clause around each mention is scored with bullish/bearish cue words
    (*buy, breakout, target, tezi, khareedain, منافع* vs *sell, crash, avoid, girawat, mandi, نقصان*), with simple
    negation ("don't buy", "mat khareedo"). Clauses are split on commas and contrast words (*but, vs, lekin, magar,
