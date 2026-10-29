@@ -6,14 +6,14 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
 from psx_yt import cli, db, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
-from psx_yt.trends import call_label, compute, tone_label, trend_label
+from psx_yt.trends import call_label, compute, summary, tone_label, trend_label
 from psx_yt.youtube import parse_rss, resolve_channel
 
 ANALYZER = Analyzer(load_tickers())
@@ -229,6 +229,28 @@ class FetchFallbackTests(unittest.TestCase):
         page.assert_called_once_with("https://www.youtube.com/@somehandle")
 
 
+class ReportTests(unittest.TestCase):
+    def test_dashboard_embeds_every_period(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dbf, out = os.path.join(tmp, "t.db"), os.path.join(tmp, "r.html")
+            conn = db.connect(dbf)
+            db.upsert_channel(conn, "UC1", "Chan 1")
+            for vid, age in (("new", 1), ("old", 40)):
+                day = (date.today() - timedelta(days=age)).isoformat()
+                db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": "Buy OGDC", "published_at": day + "T10:00:00Z"})
+            conn.commit()
+            conn.close()
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["--db", dbf, "analyze"])
+                cli.main(["--db", dbf, "report", "-o", out])
+            html = open(out, encoding="utf-8").read()
+        data, _ = json.JSONDecoder().raw_decode(html.split("const ALL = ", 1)[1])
+        self.assertEqual(sorted(map(int, data["periods"])), [7, 15, 21, 28, 90])
+        self.assertEqual(data["default"], 90)
+        videos = {d: data["periods"][d]["stocks"][0]["videos"] for d in ("7", "90")}
+        self.assertEqual(videos, {"7": 1, "90": 2})  # the 40-day-old video only shows in the 90-day view
+
+
 class CaptionTests(unittest.TestCase):
     def test_transcript_status(self):
         def err(*names):  # an exception whose class hierarchy has these names
@@ -288,6 +310,17 @@ class TrendTests(unittest.TestCase):
         self.assertEqual(call_label(2, 0, 2), "MIXED")  # tie
         self.assertEqual(call_label(2, 2, 2), "MIXED")  # nobody has half
         self.assertEqual(call_label(1, 0, 1), "-")      # too few calls
+
+    def test_summary(self):
+        base = {"videos": 13, "channel_count": 6, "recent": 3, "previous": 0, "trend": "NEW", "bullish": 2, "hold": 0,
+                "bearish": 2, "call": "MIXED", "tone_trend": "-"}
+        self.assertEqual(summary(base), "13 videos on 6 channels · 3 this week, none the week before · calls split: 2 buy, 2 sell")
+        self.assertEqual(summary({**base, "videos": 1, "channel_count": 1, "recent": 1, "bullish": 0, "bearish": 0,
+                                  "call": "-"}),
+                         "1 video on 1 channel only · new this week (1) · no buy/sell calls yet")
+        self.assertEqual(summary({**base, "trend": "RISING", "previous": 1, "bullish": 4, "bearish": 1, "call": "BUY",
+                                  "tone_trend": "IMPROVING"}),
+                         "13 videos on 6 channels · buzz rising (1→3 a week) · channels lean BUY (4 buy, 1 sell) · tone improving")
 
     def test_tone_labels(self):
         self.assertEqual(tone_label(0.5, 0.0), "IMPROVING")

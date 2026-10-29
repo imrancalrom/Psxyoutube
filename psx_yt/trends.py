@@ -48,13 +48,52 @@ def call_label(buy: int, hold: int, sell: int, min_calls: int = 3) -> str:
     return "MIXED"
 
 
+def summary(a: dict) -> str:
+    """One factual line about a stock or sector, built only from its stats (never advice), e.g.
+    '13 videos on 6 channels · new this week (3) · calls split: 2 buy, 2 sell'."""
+    n = lambda count, word: f"{count} {word}{'' if count == 1 else 's'}"
+    coverage = n(a["videos"], "video") + (" on 1 channel only" if a["channel_count"] == 1
+                                          else f" on {a['channel_count']} channels")
+    momentum = {
+        "NEW": (f"new this week ({a['recent']})" if a["recent"] == a["videos"]
+                else f"{a['recent']} this week, none the week before"),
+        "RISING": f"buzz rising ({a['previous']}→{a['recent']} a week)",
+        "FALLING": f"buzz fading ({a['previous']}→{a['recent']} a week)",
+        "STEADY": f"steady ({a['recent']} this week)",
+        "QUIET": "quiet in the last two weeks",
+    }[a["trend"]]
+    counts = ", ".join(f"{c} {w}" for c, w in ((a["bullish"], "buy"), (a["hold"], "hold"), (a["bearish"], "sell")) if c)
+    calls = {
+        "BUY": f"channels lean BUY ({counts})", "SELL": f"channels lean SELL ({counts})",
+        "HOLD": f"mostly HOLD calls ({counts})", "MIXED": f"calls split: {counts}",
+    }.get(a["call"], f"few calls so far ({counts})" if counts else "no buy/sell calls yet")
+    parts = [coverage, momentum, calls]
+    if a["tone_trend"] == "IMPROVING":
+        parts.append("tone improving")
+    elif a["tone_trend"] == "WORSENING":
+        parts.append("tone turning bearish")
+    return " · ".join(parts)
+
+
 def _net(net: int, videos: int, min_videos: int) -> float | None:
     return round(net / videos, 2) if videos >= min_videos else None
 
 
 def _aggregate(rows, start: date, today: date, window: int, dates: list[str], min_tone_videos: int,
                new_entry, min_calls: int = 3) -> list[dict]:
-    """Per-key stats from one row per (video, key). new_entry(row) gives the identifying fields for a new key."""
+    """Per-key stats from one row per (video, key). new_entry(row) gives the identifying fields for a new key.
+
+    The week-over-week fields (recent/previous counts and tone) always look at the last two windows, even when the
+    period is shorter, so a 7-day view still compares this week with the week before.
+    """
+    weeks: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])  # recent, previous, net recent, net previous
+    for r in rows:
+        age = (today - _day(r["published_at"])).days
+        if 0 <= age < 2 * window:
+            tone = (r["sentiment"] > 0) - (r["sentiment"] < 0)
+            w = weeks[r["key"]]
+            w[0 if age < window else 1] += 1
+            w[2 if age < window else 3] += tone
     agg: dict[str, dict] = {}
     for r in rows:
         d = _day(r["published_at"])
@@ -66,7 +105,6 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
                 **new_entry(r),
                 "videos": 0, "mentions": 0, "title_videos": 0, "views": 0, "buzz": 0.0,
                 "bullish": 0, "bearish": 0, "neutral": 0, "hold": 0,
-                "recent": 0, "previous": 0, "net_recent": 0, "net_previous": 0,
                 "channels": set(), "daily": defaultdict(int), "top_videos": [],
             }
         a["videos"] += 1
@@ -78,13 +116,6 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         tone = (r["sentiment"] > 0) - (r["sentiment"] < 0)
         call = "buy" if tone > 0 else "sell" if tone < 0 else "hold" if r["holds"] else ""
         a["hold"] += call == "hold"  # neutral videos with an explicit hold call
-        age = (today - d).days
-        if age < window:
-            a["recent"] += 1
-            a["net_recent"] += tone
-        elif age < 2 * window:
-            a["previous"] += 1
-            a["net_previous"] += tone
         a["channels"].add(r["channel_title"] or r["channel_id"])
         a["daily"][d.isoformat()] += 1
         a["top_videos"].append({
@@ -102,12 +133,15 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         calls = a["bullish"] + a["hold"] + a["bearish"]
         # Sort key for the call column: share of buy minus share of sell among the videos that made a call.
         a["call_score"] = round((a["bullish"] - a["bearish"]) / calls, 2) if a["call"] != "-" else None
+        key = a["symbol"] if "symbol" in a else a["sector"]
+        a["recent"], a["previous"], net_recent, net_previous = weeks[key]
         a["trend"] = trend_label(a["recent"], a["previous"])
-        a["tone_recent"] = _net(a.pop("net_recent"), a["recent"], min_tone_videos)
-        a["tone_previous"] = _net(a.pop("net_previous"), a["previous"], min_tone_videos)
+        a["tone_recent"] = _net(net_recent, a["recent"], min_tone_videos)
+        a["tone_previous"] = _net(net_previous, a["previous"], min_tone_videos)
         both = a["tone_recent"] is not None and a["tone_previous"] is not None
         a["tone_change"] = round(a["tone_recent"] - a["tone_previous"], 2) if both else None
         a["tone_trend"] = tone_label(a["tone_recent"], a["tone_previous"])
+        a["summary"] = summary(a)
         daily = a.pop("daily")
         a["series"] = [daily.get(d, 0) for d in dates]
         a["top_videos"].sort(key=lambda v: (v["published"], v["views"]), reverse=True)

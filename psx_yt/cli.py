@@ -198,18 +198,24 @@ def cmd_top(args, conn):
                   f"{tone_cell(s):<16} {call_cell(s):<14} {' '.join(s['stocks'][:5])}")
 
 
+REPORT_PERIODS = (7, 15, 21, 28, 90)  # look-backs the dashboard can switch between
+
+
 def cmd_report(args, conn):
-    data = compute(conn, load_tickers(args.tickers), days=args.days)
-    path = write_report(data, args.output)
-    print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors)")
+    stocks = load_tickers(args.tickers)
+    periods = {d: compute(conn, stocks, days=d) for d in sorted({*REPORT_PERIODS, args.days})}
+    path = write_report(periods, args.output, default=args.days)
+    data = periods[args.days]
+    print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors "
+          f"over {args.days} days; also {', '.join(str(d) for d in periods if d != args.days)}-day views)")
 
 
 EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
                  "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "tone_recent", "tone_previous",
-                 "tone_change", "tone_trend", "hold", "call", "views"]
+                 "tone_change", "tone_trend", "hold", "call", "views", "summary"]
 SECTOR_EXPORT_FIELDS = ["sector", "buzz", "videos", "direct_videos", "mentions", "title_videos", "channel_count",
                         "recent", "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score",
-                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "hold", "call", "views"]
+                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "hold", "call", "views", "summary"]
 
 
 def cmd_export(args, conn):
