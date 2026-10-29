@@ -1,0 +1,6 @@
+__pycache__/
+*.db
+report.html
+demo_report.html
+tickers_extra.csv
+.venv/

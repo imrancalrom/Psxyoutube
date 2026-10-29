@@ -1,0 +1,6 @@
+# One channel per line: an @handle, a channel URL, or a UC... channel id.
+# Copy to channels.txt, replace these placeholders with the PSX channels you follow, then run:
+#   python -m psx_yt add-channel --file channels.txt
+@SomePsxChannel
+https://www.youtube.com/@AnotherStockChannel
+UCxxxxxxxxxxxxxxxxxxxxxx
