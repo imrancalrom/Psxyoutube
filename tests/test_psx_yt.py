@@ -86,6 +86,7 @@ class SectorTests(unittest.TestCase):
         self.assertEqual(self.sectors("Refineries in Momentum"), {"Refinery": 1})
         self.assertEqual(self.sectors("E&P stocks rally, avoid OMCs"), {"Oil & Gas E&P": 1, "Oil & Gas Marketing": -1})
         self.assertEqual(self.sectors("سیمنٹ سیکٹر میں تیزی"), {"Cement": 1})
+        self.assertEqual(self.sectors("How to invest in the Oil Exploration Sector"), {"Oil & Gas E&P": 0})
 
     def test_not_sectors(self):
         self.assertEqual(self.sectors("State Bank keeps policy rate, power to the people"), {})

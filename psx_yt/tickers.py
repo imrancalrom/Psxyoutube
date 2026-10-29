@@ -139,7 +139,7 @@ SECTOR_ALIASES = {
     "Banks": ["banks", "banking sector", "banking stocks", "bank stocks", "بینکنگ سیکٹر", "بینکس"],
     "Cement": ["cement", "cement sector", "cements", "سیمنٹ"],
     "Oil & Gas E&P": ["E&P", "E & P", "exploration and production", "exploration & production", "oil & gas",
-                      "oil and gas", "oil sector", "آئل اینڈ گیس"],
+                      "oil and gas", "oil sector", "oil exploration", "exploration sector", "آئل اینڈ گیس"],
     "Oil & Gas Marketing": ["OMC", "OMCs", "oil marketing", "oil marketing companies", "gas utilities"],
     "Refinery": ["refinery", "refineries", "refining", "ریفائنری"],
     "Power": ["power sector", "power stocks", "IPP", "IPPs", "power companies"],
