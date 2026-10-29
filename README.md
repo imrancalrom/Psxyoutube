@@ -48,6 +48,10 @@ the run summary, and the report and CSVs can be downloaded from the run's artifa
 | YouTube Data API v3 | `export YOUTUBE_API_KEY=...` ([get a key](https://console.cloud.google.com/apis/library/youtube.googleapis.com)) | full upload history (`--max 200` per channel) |
 | Transcripts | `fetch --transcripts` / `run --transcripts` | reads Urdu/English captions, catching stocks only mentioned out loud |
 
+If the API fails (bad key, wrong API restrictions, quota used up), that channel is fetched from RSS instead, and
+when the key itself is rejected (HTTP 400/401/403) the rest of the run uses RSS too; in GitHub Actions this shows
+as a warning on the run. Error messages never include the key.
+
 A video is marked as having no captions only when YouTube says so and it is more than 2 days old (auto-captions can
 take a while). Blocked or failed requests are left for the next run, and fetching stops after 5 failures in a row.
 `--retry-captions` tries the videos marked caption-less again.

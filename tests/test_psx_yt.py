@@ -153,6 +153,54 @@ class YouTubeTests(unittest.TestCase):
                 get.assert_called_with(url)
 
 
+class FetchFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = db.connect(":memory:")
+        for cid in ("UC1", "UC2", "UC3"):
+            db.upsert_channel(self.conn, cid, cid)
+        self.args = argparse.Namespace(api_key="KEY", max=200, transcripts=False, retry_captions=False)
+
+    def rss(self, cid):
+        return cid, [{"id": f"{cid}-rss", "title": "OGDC", "published_at": "2026-10-28T10:00:00Z"}]
+
+    def fetch(self, api):
+        with mock.patch.object(youtube, "fetch_api", api), \
+                mock.patch.object(youtube, "fetch_rss", side_effect=self.rss) as rss, \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            cli.cmd_fetch(self.args, self.conn)
+        return rss, out.getvalue()
+
+    def test_rejected_key_switches_whole_run_to_rss(self):
+        api = mock.Mock(side_effect=youtube.YouTubeError("HTTP 403: blocked", 403))
+        rss, out = self.fetch(api)
+        self.assertEqual(api.call_count, 1)  # not retried for every channel
+        self.assertEqual(rss.call_count, 3)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0], 3)
+        self.assertIn("rejected the key", out)
+
+    def test_one_failing_channel_keeps_api_for_the_rest(self):
+        ok = ("T", [{"id": "api", "title": "HUBC", "published_at": "2026-10-28T10:00:00Z"}])
+        api = mock.Mock(side_effect=[youtube.YouTubeError("Channel UC1 not found"), ok, ok])
+        rss, _ = self.fetch(api)
+        self.assertEqual((api.call_count, rss.call_count), (3, 1))
+
+    def test_error_message_leaves_out_the_key(self):
+        response = mock.Mock(status_code=403, url="https://x/channels?id=UC1&key=SECRET")
+        response.json.return_value = {"error": {"message": "Requests to this API are blocked."}}
+        with mock.patch.object(youtube.requests, "get", return_value=response):
+            with self.assertRaises(youtube.YouTubeError) as caught:
+                youtube._get("https://x/channels", id="UC1", key="SECRET")
+        self.assertNotIn("SECRET", str(caught.exception))
+        self.assertIn("HTTP 403: Requests to this API are blocked.", str(caught.exception))
+        self.assertEqual(caught.exception.status, 403)
+
+    def test_channel_lookup_falls_back_to_page(self):
+        with mock.patch.object(youtube, "_get", side_effect=youtube.YouTubeError("HTTP 403", 403)), \
+                mock.patch.object(youtube, "_scrape_channel_page", return_value=("UCx", "Name")) as page:
+            self.assertEqual(resolve_channel("@somehandle", "KEY"), ("UCx", "Name"))
+        page.assert_called_once_with("https://www.youtube.com/@somehandle")
+
+
 class CaptionTests(unittest.TestCase):
     def test_transcript_status(self):
         def err(*names):  # an exception whose class hierarchy has these names
