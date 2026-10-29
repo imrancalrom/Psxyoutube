@@ -2,3 +2,5 @@
 # One per line: an @handle, a channel URL (/@name, /channel/UC..., /c/name, /user/name) or a UC... channel id.
 # Pakistan Stock Exchange Limited, official channel
 https://www.youtube.com/c/PakistanStockExchangeLimited
+# Stockify
+https://www.youtube.com/@stockifyyltd
