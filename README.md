@@ -22,6 +22,22 @@ python -m psx_yt run
 
 Re-run `python -m psx_yt run` daily (cron / Task Scheduler) to build up history; videos are stored in `psx_yt.db`.
 
+### Daily runs on GitHub Actions
+
+`.github/workflows/daily.yml` runs the tracker every day at 21:17 Pakistan time (16:17 UTC), so nothing has to run on
+your own machine:
+
+1. Copy `channels.example.txt` to `channels.txt`, list your channels and commit it.
+2. Optional: add a `YOUTUBE_API_KEY` repository secret (Settings → Secrets and variables → Actions) for full upload
+   history, and a `FETCH_TRANSCRIPTS` variable set to `true` to read captions. YouTube often blocks caption requests
+   from cloud servers, so transcripts may come back empty there.
+3. Run it once from the Actions tab ("Daily PSX YouTube run" → Run workflow) to check it works.
+
+Each run keeps the database, the latest `report.html` and `psx_buzz.csv` on a `data` branch, replaced by one fresh
+commit each day. The database already holds the full history, so old copies are not kept. The leaderboard appears in
+the run summary, and the report and CSV can be downloaded from the run's artifacts. To work with the data locally:
+`git fetch origin data && git show origin/data:psx_yt.db > psx_yt.db`.
+
 ### Getting more data
 
 | Mode | Setup | What you get |
