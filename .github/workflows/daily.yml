@@ -51,6 +51,7 @@ jobs:
           mkdir -p out
           if git fetch --depth=1 origin data 2>/dev/null; then
             git show FETCH_HEAD:psx_yt.db > out/psx_yt.db
+            echo "DATA_BASE=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_ENV"
             echo "Restored $(du -h out/psx_yt.db | cut -f1) database"
           else
             echo "No data branch yet: starting a new database"
@@ -96,4 +97,6 @@ jobs:
           mv out/psx_yt.db out/report.html out/psx_buzz.csv out/psx_sectors.csv .
           git add -f psx_yt.db report.html psx_buzz.csv psx_sectors.csv
           git commit -q -m "Data as of $(date -u '+%Y-%m-%d %H:%M UTC')"
-          git push --force origin data-new:data
+          # Only replace the data we started from: if scripts/local_captions.py pushed meanwhile, fail rather than
+          # drop its captions (the next run starts from them). An empty DATA_BASE means "data must not exist yet".
+          git push --force-with-lease="refs/heads/data:${DATA_BASE:-}" origin data-new:data

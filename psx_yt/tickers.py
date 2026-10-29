@@ -41,11 +41,13 @@ _STOCKS = [
     ("HUBC", "Hub Power Company", "Power", ["hub power", "hubco", "حب پاور"], False),
     ("KAPCO", "Kot Addu Power Company", "Power", ["kot addu power"], False),
     ("NCPL", "Nishat Chunian Power", "Power", ["nishat chunian power"], False),
+    ("NPL", "Nishat Power Ltd", "Power", ["nishat power"], False),
     ("KEL", "K-Electric", "Power", ["k-electric", "k electric", "kelectric"], False),
     # Cement
     ("LUCK", "Lucky Cement", "Cement", ["lucky cement", "لکی سیمنٹ"], True),
     ("DGKC", "D.G. Khan Cement", "Cement", ["dg khan cement", "d.g. khan cement", "d g khan cement"], False),
     ("MLCF", "Maple Leaf Cement", "Cement", ["maple leaf cement", "maple leaf"], False),
+    ("DNCC", "Dandot Cement", "Cement", ["dandot cement", "dandot"], False),
     ("FCCL", "Fauji Cement Company", "Cement", ["fauji cement"], False),
     ("CHCC", "Cherat Cement", "Cement", ["cherat cement"], False),
     ("KOHC", "Kohat Cement", "Cement", ["kohat cement"], False),
@@ -105,6 +107,7 @@ _STOCKS = [
     # Autos
     ("INDU", "Indus Motor Company", "Automobile", ["indus motor", "indus motors"], False),
     ("HCAR", "Honda Atlas Cars", "Automobile", ["honda atlas"], False),
+    ("ATLH", "Atlas Honda Ltd", "Automobile", ["atlas honda"], False),
     ("MTL", "Millat Tractors", "Automobile", ["millat tractors", "millat tractor"], False),
     ("SAZEW", "Sazgar Engineering Works", "Automobile", ["sazgar"], False),
     ("GHNI", "Ghandhara Industries", "Automobile", ["ghandhara industries"], False),
@@ -123,7 +126,9 @@ _STOCKS = [
     ("GHGL", "Ghani Glass", "Glass", ["ghani glass"], False),
     ("PABC", "Pakistan Aluminium Beverage Cans", "Misc", ["pakistan aluminium beverage"], False),
     ("PIBTL", "Pakistan International Bulk Terminal", "Transport", ["pakistan international bulk"], False),
+    ("PNSC", "Pakistan National Shipping Corporation", "Transport", ["pakistan national shipping", "national shipping corporation"], False),
     ("TPLP", "TPL Properties", "Real Estate", ["tpl properties"], False),
+    ("TPL", "TPL Corp Ltd", "Investment", ["tpl corp", "tpl corporation"], False),
     ("JSCL", "Jahangir Siddiqui & Co", "Investment", ["jahangir siddiqui"], False),
 ]
 
