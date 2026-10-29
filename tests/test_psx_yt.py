@@ -11,12 +11,14 @@ from unittest import mock
 
 from psx_yt import cli, db, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
-                             strip_payment_details)
+                             strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
-from psx_yt.trends import compute, tone_label, trend_label
+from psx_yt.trends import call_label, compute, tone_label, trend_label
 from psx_yt.youtube import parse_rss, resolve_channel
 
 ANALYZER = Analyzer(load_tickers())
+INSERT_MENTION = ("INSERT INTO mentions (video_id, symbol, in_title, in_description, in_transcript, sentiment, holds) "
+                  "VALUES (?,?,?,?,?,?,?)")
 
 
 def symbols(text):
@@ -42,6 +44,8 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(symbols("Atlas Honda and Honda Atlas"), ["ATLH", "HCAR"])
         self.assertEqual(symbols("Nishat Power vs Nishat Chunian Power"), ["NPL", "NCPL"])
         self.assertEqual(symbols("TPL Properties and TPL Corp"), ["TPLP", "TPL"])
+        self.assertEqual(symbols("FCCL, NATF & BOP earnings; MACPAC Films Limited (MACFL) rally"),
+                         ["FCCL", "NATF", "BOP", "MACFL", "MACFL"])
 
     def test_roman_urdu_and_urdu(self):
         self.assertEqual(symbols("میزان بینک اور حب پاور"), ["MEBL", "HUBC"])
@@ -57,6 +61,7 @@ class SentimentTests(unittest.TestCase):
 
     def test_roman_urdu(self):
         self.assertEqual(self.tone("HUBC mein tezi, abhi khareedain"), [("HUBC", 1)])
+        self.assertEqual(self.tone("34:57 Top Picks - (NATF)"), [("NATF", 1)])
         self.assertEqual(self.tone("PSO mein girawat"), [("PSO", -1)])
 
     def test_negation(self):
@@ -71,9 +76,26 @@ class SentimentTests(unittest.TestCase):
         self.assertEqual(self.tone("OGDC, HUBC and PSO: buy all three"), [("OGDC", 1), ("HUBC", 1), ("PSO", 1)])
         self.assertEqual(self.tone("Weekly review | OGDC, HUBC discussed"), [("OGDC", 0), ("HUBC", 0)])
 
+    def calls(self, text):
+        return [(m.symbol, m.sentiment, m.hold) for m in ANALYZER.find_mentions(text)]
+
+    def test_hold_calls(self):
+        self.assertEqual(self.calls("Hold OGDC for now"), [("OGDC", 0, 1)])
+        self.assertEqual(self.calls("FFC ko hold rakhein"), [("FFC", 0, 1)])
+        self.assertEqual(self.calls("OGDC: buy and hold"), [("OGDC", 1, 0)])  # buy wins
+        self.assertEqual(self.calls("Don't hold PSO"), [("PSO", -1, 0)])
+
+    def test_names_and_phrases_are_not_hold_calls(self):
+        self.assertEqual(self.calls("Engro Holdings results"), [("ENGROH", 0, 0)])
+        self.assertEqual(self.calls("Holding company TPL Corp update"), [("TPL", 0, 0)])
+        self.assertEqual(self.calls("UNITY FOODS BUY SELL OR HOLD, detailed analysis"), [("UNITY", 0, 0)])
+        self.assertEqual(self.calls("Should you buy or sell OGDC?"), [("OGDC", 0, 0)])
+        self.assertEqual(self.calls("Lucky Cement sales hold steady"), [("LUCK", 0, 0)])
+        self.assertEqual(self.calls("Property holding vs REITs: TPL Properties"), [("TPLP", 0, 0)])
+
     def test_analyze_video_sources(self):
         out = analyze_video(ANALYZER, "OGDC breakout", "OGDC and PPL details", None)
-        self.assertEqual(out["OGDC"], {"title": 1, "description": 1, "transcript": 0, "sentiment": 1})
+        self.assertEqual(out["OGDC"], {"title": 1, "description": 1, "transcript": 0, "sentiment": 1, "holds": 0})
         self.assertNotIn("PPL", out)  # untagged PPL is ambiguous
 
 
@@ -95,6 +117,12 @@ class SectorTests(unittest.TestCase):
     def test_general_words_are_not_sectors(self):
         self.assertEqual(self.sectors("Real estate trap vs Roshan Digital Account, digital banking"), {})
         self.assertEqual(self.sectors("REITs and the banking sector"), {"Real Estate": 0, "Banks": 0})
+
+    def test_links_to_other_videos_dropped(self):
+        titles = {title_key("Watch This Before Investing in Any Bank | Meezan Bank")}
+        desc = ("Khaadi IPO explained\n🎥 WATCH OUR MOST USEFUL VIDEOS\n"
+                "▶ Watch This Before Investing in Any Bank | Meezan Bank https://youtu.be/x\nOGDC is also discussed")
+        self.assertEqual(symbols(strip_video_titles(desc, titles)), ["OGDC"])
 
     def test_payment_details_dropped(self):
         desc = ("OGDC results discussed\nBank Account Details:\nTitle of Account: Some Institute\nMCB\n"
@@ -253,6 +281,14 @@ class TrendTests(unittest.TestCase):
         self.assertEqual(trend_label(3, 0), "NEW")
         self.assertEqual(trend_label(3, 3), "STEADY")
 
+    def test_call_labels(self):
+        self.assertEqual(call_label(4, 1, 1), "BUY")
+        self.assertEqual(call_label(0, 3, 1), "HOLD")
+        self.assertEqual(call_label(1, 0, 2), "SELL")
+        self.assertEqual(call_label(2, 0, 2), "MIXED")  # tie
+        self.assertEqual(call_label(2, 2, 2), "MIXED")  # nobody has half
+        self.assertEqual(call_label(1, 0, 1), "-")      # too few calls
+
     def test_tone_labels(self):
         self.assertEqual(tone_label(0.5, 0.0), "IMPROVING")
         self.assertEqual(tone_label(-0.5, 0.0), "WORSENING")
@@ -268,8 +304,8 @@ class TrendTests(unittest.TestCase):
         for vid, ts, title, views in vids:
             db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "published_at": ts, "views": views})
             for sym, m in analyze_video(ANALYZER, title, "", None).items():
-                conn.execute("INSERT INTO mentions VALUES (?,?,?,?,?,?)",
-                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"]))
+                conn.execute(INSERT_MENTION,
+                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"]))
         data = compute(conn, load_tickers(), days=30, today=date(2026, 10, 29))
         ogdc = data["stocks"][0]
         self.assertEqual((ogdc["symbol"], ogdc["videos"], ogdc["recent"], ogdc["previous"]), ("OGDC", 3, 2, 1))
@@ -290,8 +326,8 @@ class TrendTests(unittest.TestCase):
         for vid, day, title in vids:
             db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "published_at": day + "T10:00:00Z"})
             for sym, m in analyze_video(ANALYZER, title, "", None).items():
-                conn.execute("INSERT INTO mentions VALUES (?,?,?,?,?,?)",
-                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"]))
+                conn.execute(INSERT_MENTION,
+                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"]))
         ogdc = compute(conn, load_tickers(), days=30, today=date(2026, 10, 29), min_tone_videos=2)["stocks"][0]
         self.assertEqual((ogdc["tone_previous"], ogdc["tone_recent"], ogdc["tone_change"], ogdc["tone_trend"]),
                          (-1.0, 0.5, 1.5, "IMPROVING"))

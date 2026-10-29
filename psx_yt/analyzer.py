@@ -8,7 +8,7 @@ from .tickers import SECTOR_ALIASES, Stock
 # Bullish / bearish cue words in English, Roman Urdu and Urdu script.
 BULLISH = [
     r"buy(?:ing)?", r"bullish", r"break\s?out", r"targets?", r"upside", r"accumulat\w*", r"rall(?:y|ies)",
-    r"up\s?trend", r"undervalued", r"dividends?", r"payout", r"rebound\w*", r"multi\s?bagger", r"top pick",
+    r"up\s?trend", r"undervalued", r"dividends?", r"payout", r"rebound\w*", r"multi\s?bagger", r"top picks?",
     r"strong results", r"record profits?", r"outperform\w*", r"all[\s-]time high", r"new high", r"momentum", r"turn\s?around",
     r"khareed\w*", r"kharid\w*", r"tezi", r"taizi", r"munafa", r"خرید\w*", r"تیزی", r"منافع",
 ]
@@ -17,10 +17,18 @@ BEARISH = [
     r"overvalued", r"loss(?:es)?", r"avoid", r"exit", r"underperform\w*", r"red zone",
     r"girawat", r"mandi", r"mandee", r"nuqsan", r"nuksan", r"bech do", r"becho", r"مندی", r"گراوٹ", r"نقصان",
 ]
+# Explicit "hold" calls. Buy or sell in the same clause wins ("buy and hold" is a buy).
+# Bare "holding" is left out: it is usually a noun ("holdings", "holding company", "property holding").
+HOLD = [r"hold(?!\s+(?:steady|firm|support|levels?|the line|ground))(?:\s+(?:on|kar\w*|rakh\w*))?", r"holding on",
+        r"keep holding", r"stay invested", r"ہولڈ"]
 NEGATORS = {"not", "don't", "dont", "never", "no", "mat", "na", "nahi", "nahin"}
 
 _BULL_RE = re.compile(r"(?<!\w)(?:" + "|".join(BULLISH) + r")(?!\w)", re.IGNORECASE)
 _BEAR_RE = re.compile(r"(?<!\w)(?:" + "|".join(BEARISH) + r")(?!\w)", re.IGNORECASE)
+_HOLD_RE = re.compile(r"(?<!\w)(?:" + "|".join(HOLD) + r")(?!\w)", re.IGNORECASE)
+# "Buy, sell or hold?" / "BUY SELL HOLD" lists the options rather than making a call ("buy and hold" is still a buy).
+_CALL_WORD = r"(?:buy|sell|hold)"
+_OPTIONS_RE = re.compile(rf"(?<!\w){_CALL_WORD}(?:[\s,/|]+(?:or\s+)?{_CALL_WORD}(?!\w))+", re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"[.!?\n|۔؟]+")
 # Clause breaks inside a sentence: punctuation and contrast words ("buy OGDC, but sell PSO", "OGDC lo lekin PSO becho").
 _CLAUSE_SPLIT = re.compile(
@@ -35,6 +43,7 @@ class Mention:
     start: int
     end: int
     sentiment: int  # +1 bullish, -1 bearish, 0 neutral
+    hold: int = 0  # 1 when a neutral mention comes with an explicit hold call
 
 
 def _alias_pattern(alias: str) -> str:
@@ -69,12 +78,12 @@ class Analyzer:
 
         Sector words inside a stock's name ('Lucky Cement', 'Engro Fertilizer') don't count: that is the stock.
         """
-        stocks = self.find_mentions(text)
-        return [m for m in self._find(self._sector_patterns, text)
-                if all(m.end <= s.start or m.start >= s.end for s in stocks)]
+        stocks = [(m.start, m.end) for m in self.find_mentions(text)]
+        return [m for m in self._find(self._sector_patterns, text, stocks)
+                if all(m.end <= s or m.start >= e for s, e in stocks)]
 
     @staticmethod
-    def _find(patterns, text: str) -> list[Mention]:
+    def _find(patterns, text: str, mask: list[tuple[int, int]] = ()) -> list[Mention]:
         if not text:
             return []
         candidates = []
@@ -87,17 +96,26 @@ class Analyzer:
             if all(end <= s or start >= e for s, e, _ in taken):
                 taken.append((start, end, symbol))
         taken.sort()
-        return [Mention(sym, s, e, sentence_sentiment(text, s, e)) for s, e, sym in taken]
+        # Blank out the names themselves before scoring, so "Engro Holdings" or "Pakistan Refinery" carry no cue.
+        scored = list(text)
+        for s, e in [*mask, *((s, e) for s, e, _ in taken)]:
+            scored[s:e] = " " * (e - s)
+        scored = "".join(scored)
+        return [Mention(sym, s, e, *_tone(scored, s, e)) for s, e, sym in taken]
 
 
-def _score(fragment: str) -> int:
-    score = 0
-    for rx, sign in ((_BULL_RE, 1), (_BEAR_RE, -1)):
+def _score(fragment: str) -> tuple[int, int]:
+    """(buy minus sell cues, hold cues) in a fragment; a negated cue counts the other way ("don't hold" is a sell)."""
+    score = holds = 0
+    for rx, sign in ((_BULL_RE, 1), (_BEAR_RE, -1), (_HOLD_RE, 0)):
         for m in rx.finditer(fragment):
             before = fragment[: m.start()].lower().split()[-2:]
             negated = any(w.strip(",;:") in NEGATORS for w in before)
-            score += -sign if negated else sign
-    return score
+            if sign == 0:
+                score, holds = (score - 1, holds) if negated else (score, holds + 1)
+            else:
+                score += -sign if negated else sign
+    return score, holds
 
 
 def _span(split_re: re.Pattern, text: str, start: int, end: int, lo: int = 0, hi: int | None = None) -> tuple[int, int]:
@@ -108,16 +126,27 @@ def _span(split_re: re.Pattern, text: str, start: int, end: int, lo: int = 0, hi
     return left, right_match.start() if right_match else hi
 
 
-def sentence_sentiment(text: str, start: int, end: int) -> int:
-    """Tone around text[start:end]: +1, -1 or 0.
+def _tone(text: str, start: int, end: int) -> tuple[int, int]:
+    """(tone, hold) around text[start:end]: tone +1, -1 or 0; hold 1 for an explicit hold call with no buy/sell.
 
     The clause holding the mention decides ("Buy OGDC, sell PSO" is bullish OGDC, bearish PSO); when that clause has
     no cue words the whole sentence is used ("OGDC, PPL and PSO: buy all three").
     """
     s_left, s_right = _span(_SENTENCE_SPLIT, text, start, end)
     c_left, c_right = _span(_CLAUSE_SPLIT, text, start, end, s_left, s_right)
-    score = _score(text[c_left:c_right]) or _score(text[s_left:s_right])
-    return (score > 0) - (score < 0)
+    for left, right in ((c_left, c_right), (s_left, s_right)):
+        if _OPTIONS_RE.search(text, left, right):
+            return 0, 0  # "Buy, sell or hold?" asks the question rather than answering it
+        score, holds = _score(text[left:right])
+        if score or holds:
+            break
+    tone = (score > 0) - (score < 0)
+    return tone, int(tone == 0 and holds > 0)
+
+
+def sentence_sentiment(text: str, start: int, end: int) -> int:
+    """Tone around text[start:end]: +1, -1 or 0."""
+    return _tone(text, start, end)[0]
 
 
 def boilerplate_lines(descriptions: list[str], share: float = 0.5, min_videos: int = 3) -> set[str]:
@@ -156,6 +185,23 @@ def strip_payment_details(text: str) -> str:
     return "\n".join(ln for i, ln in enumerate(lines) if i not in drop)
 
 
+_URL = re.compile(r"https?://\S+")
+
+
+def title_key(text: str) -> str:
+    """A video title or description line reduced for comparison: no links, bullets, emoji or case."""
+    text = _URL.sub(" ", text)
+    return " ".join(re.sub(r"[^\w\s|&%.,:'?!-]", " ", text).split()).strip(" -|:").lower()
+
+
+def strip_video_titles(text: str, titles: set[str]) -> str:
+    """Drop description lines that are the title of another video on the channel ('WATCH OUR MOST USEFUL VIDEOS'
+    lists): they link elsewhere and say nothing about this video."""
+    if not titles:
+        return text or ""
+    return "\n".join(ln for ln in (text or "").splitlines() if title_key(ln) not in titles)
+
+
 def strip_lines(text: str, lines: set[str]) -> str:
     if not lines:
         return text or ""
@@ -166,9 +212,10 @@ def _summarize(find, title: str, description: str, transcript: str | None) -> di
     out: dict[str, dict] = {}
     for source, text in (("title", title), ("description", description), ("transcript", transcript)):
         for m in find(text or ""):
-            row = out.setdefault(m.symbol, {"title": 0, "description": 0, "transcript": 0, "sentiment": 0})
+            row = out.setdefault(m.symbol, {"title": 0, "description": 0, "transcript": 0, "sentiment": 0, "holds": 0})
             row[source] += 1
             row["sentiment"] += m.sentiment
+            row["holds"] += m.hold
     return out
 
 

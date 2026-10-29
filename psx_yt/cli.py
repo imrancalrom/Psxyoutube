@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import db, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
-                       strip_payment_details)
+                       strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
 from .tickers import load_tickers
 from .trends import compute
@@ -147,21 +147,30 @@ def cmd_analyze(args, conn):
     for v in videos:
         by_channel.setdefault(v["channel_id"], []).append(v["description"] or "")
     boilerplate = {cid: boilerplate_lines(descs) for cid, descs in by_channel.items()}
+    titles: dict[str, set[str]] = {}
+    for v in videos:
+        titles.setdefault(v["channel_id"], set()).add(title_key(v["title"]))
     for v in videos:
         n_videos += 1
         description = strip_payment_details(strip_lines(v["description"], boilerplate[v["channel_id"]]))
+        description = strip_video_titles(description, titles[v["channel_id"]] - {title_key(v["title"])})
         texts = (v["title"], description, v["transcript"])
         for table, found in (("mentions", analyze_video(analyzer, *texts)),
                              ("sector_mentions", analyze_video_sectors(analyzer, *texts))):
             for key, m in found.items():
-                conn.execute(f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?)",
-                             (v["id"], key, m["title"], m["description"], m["transcript"], m["sentiment"]))
+                conn.execute(f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?)",
+                             (v["id"], key, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"]))
             if table == "mentions":
                 n_mentions += len(found)
             else:
                 n_sectors += len(found)
     conn.commit()
     print(f"Analyzed {n_videos} videos: {n_mentions} stock mentions, {n_sectors} sectors named outright")
+
+
+def call_cell(s: dict) -> str:
+    """'BUY 5/2/1' style: consensus, then buy/hold/sell video counts."""
+    return f"{s['call']:<5} {s['bullish']}/{s['hold']}/{s['bearish']}"
 
 
 def tone_cell(s: dict) -> str:
@@ -173,20 +182,20 @@ def cmd_top(args, conn):
     data = compute(conn, load_tickers(args.tickers), days=args.days)
     print(f"PSX stocks on YouTube, {data['start']} to {data['end']} ({data['video_count']} videos)\n")
     print(f"{'#':>3}  {'Symbol':<8} {'Sector':<20} {'Buzz':>7} {'Videos':>6} {'Chan':>4} "
-          f"{'7d':>4} {'prev':>4}  {'Trend':<8} {'Sent':>5}  {'Tone 7d':<16}")
+          f"{'7d':>4} {'prev':>4}  {'Trend':<8} {'Sent':>5}  {'Tone 7d':<16} {'Call (b/h/s)':<14}")
     for i, s in enumerate(data["stocks"][: args.limit], 1):
         print(f"{i:>3}  {s['symbol']:<8} {s['sector'][:20]:<20} {s['buzz']:>7} {s['videos']:>6} "
               f"{s['channel_count']:>4} {s['recent']:>4} {s['previous']:>4}  {s['trend']:<8} "
-              f"{s['sentiment_score']:>+5.2f}  {tone_cell(s):<16}")
+              f"{s['sentiment_score']:>+5.2f}  {tone_cell(s):<16} {call_cell(s):<14}")
     if not data["stocks"]:
         print("No mentions found. Run `fetch` and `analyze` first.")
     if data["sectors"]:
         print(f"\n     {'Sector':<20} {'Buzz':>7} {'Videos':>6} {'Named':>5} "
-              f"{'7d':>4} {'prev':>4}  {'Trend':<8} {'Sent':>5}  {'Tone 7d':<16} Stocks")
+              f"{'7d':>4} {'prev':>4}  {'Trend':<8} {'Sent':>5}  {'Tone 7d':<16} {'Call (b/h/s)':<14} Stocks")
         for s in data["sectors"][: args.limit]:
             print(f"     {s['sector'][:20]:<20} {s['buzz']:>7} {s['videos']:>6} {s['direct_videos']:>5} "
                   f"{s['recent']:>4} {s['previous']:>4}  {s['trend']:<8} {s['sentiment_score']:>+5.2f}  "
-                  f"{tone_cell(s):<16} {' '.join(s['stocks'][:5])}")
+                  f"{tone_cell(s):<16} {call_cell(s):<14} {' '.join(s['stocks'][:5])}")
 
 
 def cmd_report(args, conn):
@@ -197,10 +206,10 @@ def cmd_report(args, conn):
 
 EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
                  "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "tone_recent", "tone_previous",
-                 "tone_change", "tone_trend", "views"]
+                 "tone_change", "tone_trend", "hold", "call", "views"]
 SECTOR_EXPORT_FIELDS = ["sector", "buzz", "videos", "direct_videos", "mentions", "title_videos", "channel_count",
                         "recent", "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score",
-                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "views"]
+                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "hold", "call", "views"]
 
 
 def cmd_export(args, conn):

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS mentions (
     in_description INTEGER NOT NULL,
     in_transcript INTEGER NOT NULL,
     sentiment INTEGER NOT NULL,
+    holds INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (video_id, symbol)
 );
 CREATE TABLE IF NOT EXISTS sector_mentions (
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS sector_mentions (
     in_description INTEGER NOT NULL,
     in_transcript INTEGER NOT NULL,
     sentiment INTEGER NOT NULL,
+    holds INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (video_id, sector)
 );
 CREATE INDEX IF NOT EXISTS idx_videos_published ON videos(published_at);
@@ -43,6 +45,9 @@ def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    for table in ("mentions", "sector_mentions"):  # databases made before hold calls were tracked
+        if "holds" not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN holds INTEGER NOT NULL DEFAULT 0")
     return conn
 
 

@@ -36,12 +36,24 @@ def tone_label(recent: float | None, previous: float | None, min_change: float =
     return "STABLE"
 
 
+def call_label(buy: int, hold: int, sell: int, min_calls: int = 3) -> str:
+    """Consensus of the buy/hold/sell calls made in videos: the call with at least half of them, else MIXED;
+    '-' when fewer than min_calls videos made a call."""
+    calls = buy + hold + sell
+    if calls < min_calls:
+        return "-"
+    ranked = sorted((("BUY", buy), ("HOLD", hold), ("SELL", sell)), key=lambda c: -c[1])
+    if ranked[0][1] * 2 >= calls and ranked[0][1] > ranked[1][1]:
+        return ranked[0][0]
+    return "MIXED"
+
+
 def _net(net: int, videos: int, min_videos: int) -> float | None:
     return round(net / videos, 2) if videos >= min_videos else None
 
 
 def _aggregate(rows, start: date, today: date, window: int, dates: list[str], min_tone_videos: int,
-               new_entry) -> list[dict]:
+               new_entry, min_calls: int = 3) -> list[dict]:
     """Per-key stats from one row per (video, key). new_entry(row) gives the identifying fields for a new key."""
     agg: dict[str, dict] = {}
     for r in rows:
@@ -53,7 +65,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
             a = agg[r["key"]] = {
                 **new_entry(r),
                 "videos": 0, "mentions": 0, "title_videos": 0, "views": 0, "buzz": 0.0,
-                "bullish": 0, "bearish": 0, "neutral": 0,
+                "bullish": 0, "bearish": 0, "neutral": 0, "hold": 0,
                 "recent": 0, "previous": 0, "net_recent": 0, "net_previous": 0,
                 "channels": set(), "daily": defaultdict(int), "top_videos": [],
             }
@@ -64,6 +76,8 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["buzz"] += (2 if r["in_title"] else 1) * (1 + math.log10(1 + (r["views"] or 0)))
         a["bullish" if r["sentiment"] > 0 else "bearish" if r["sentiment"] < 0 else "neutral"] += 1
         tone = (r["sentiment"] > 0) - (r["sentiment"] < 0)
+        call = "buy" if tone > 0 else "sell" if tone < 0 else "hold" if r["holds"] else ""
+        a["hold"] += call == "hold"  # neutral videos with an explicit hold call
         age = (today - d).days
         if age < window:
             a["recent"] += 1
@@ -75,7 +89,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["daily"][d.isoformat()] += 1
         a["top_videos"].append({
             "id": r["video_id"], "title": r["title"], "channel": r["channel_title"] or r["channel_id"],
-            "published": d.isoformat(), "views": r["views"] or 0, "sentiment": tone,
+            "published": d.isoformat(), "views": r["views"] or 0, "sentiment": tone, "call": call,
         })
 
     result = []
@@ -84,6 +98,10 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["channel_count"] = len(a["channels"])
         a["buzz"] = round(a["buzz"], 1)
         a["sentiment_score"] = round((a["bullish"] - a["bearish"]) / a["videos"], 2)
+        a["call"] = call_label(a["bullish"], a["hold"], a["bearish"], min_calls)
+        calls = a["bullish"] + a["hold"] + a["bearish"]
+        # Sort key for the call column: share of buy minus share of sell among the videos that made a call.
+        a["call_score"] = round((a["bullish"] - a["bearish"]) / calls, 2) if a["call"] != "-" else None
         a["trend"] = trend_label(a["recent"], a["previous"])
         a["tone_recent"] = _net(a.pop("net_recent"), a["recent"], min_tone_videos)
         a["tone_previous"] = _net(a.pop("net_previous"), a["previous"], min_tone_videos)
@@ -112,10 +130,10 @@ def _sector_rows(stock_rows, sector_rows, stocks: dict[str, Stock]) -> list[dict
         if m is None:
             m = merged[(r["video_id"], sector)] = {
                 **{k: r[k] for k in ("video_id", "title", "published_at", "views", "channel_id", "channel_title")},
-                "key": sector, "in_title": 0, "in_description": 0, "in_transcript": 0, "sentiment": 0,
+                "key": sector, "in_title": 0, "in_description": 0, "in_transcript": 0, "sentiment": 0, "holds": 0,
                 "direct": False, "symbols": set(),
             }
-        for k in ("in_title", "in_description", "in_transcript", "sentiment"):
+        for k in ("in_title", "in_description", "in_transcript", "sentiment", "holds"):
             m[k] += r[k]
         if symbol:
             m["symbols"].add(symbol)
