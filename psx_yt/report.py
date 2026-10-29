@@ -9,7 +9,6 @@ TEMPLATE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PSX YouTube Buzz</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
   --bg: #f7f7f5; --surface: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --border: #e3e2dc;
@@ -36,7 +35,19 @@ h2 { font-size: 15px; margin: 0 0 12px; }
 .tile .l { color: var(--muted); font-size: 12px; }
 .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
 @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
-.chart { position: relative; height: 280px; }
+.chart { min-height: 230px; }
+.chart svg { display: block; overflow: visible; }
+.chart svg text { fill: var(--muted); font-size: 11px; }
+.chart .grid { stroke: var(--border); }
+.chart .hit { fill: transparent; }
+.chart .hit:hover { fill: var(--border); fill-opacity: 0.35; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.bar { display: grid; grid-template-columns: minmax(0, 9em) 1fr 3.5em; gap: 8px; align-items: center; font-size: 12px; margin: 7px 0; }
+.bl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt { height: 12px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.bt span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.bv { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 input[type=search], select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--bg); color: var(--text); font: inherit; }
 input[type=search] { flex: 1 1 220px; max-width: 320px; }
@@ -82,8 +93,8 @@ tr.row.note:hover { background: none; }
   <div class="toolbar"><span class="lbl">Period</span><div class="seg" id="periods" role="group" aria-label="Period"></div></div>
   <div class="tiles" id="tiles"></div>
   <div class="grid">
-    <div class="card"><h2>Daily videos mentioning the top 5 stocks</h2><div class="chart"><canvas id="line"></canvas></div></div>
-    <div class="card"><h2>Buzz by sector</h2><div class="chart"><canvas id="sectors"></canvas></div></div>
+    <div class="card"><h2 id="lineTitle">Daily videos mentioning the top 5 stocks</h2><div class="chart" id="line"></div></div>
+    <div class="card"><h2>Buzz by sector</h2><div class="chart" id="sectors"></div></div>
   </div>
   <div class="card section">
     <h2>Sectors</h2>
@@ -168,34 +179,61 @@ function drawTiles() {
     `<div class="tile"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join("");
 }
 
-const charts = {};
-function drawCharts() {
-  if (!window.Chart) {
-    document.querySelectorAll(".chart").forEach(el => {
-      el.innerHTML = '<p class="name">Charts need an internet connection to load Chart.js.</p>';
-    });
-    return;
+// Charts are drawn here, with no library, so the page works offline and inside app previews.
+function lineChart(el, dates, series) {
+  const W = Math.max(280, el.clientWidth), H = 230, L = 30, R = 10, T = 10, B = 24;
+  const max = Math.max(1, ...series.flatMap(s => s.data));
+  const step = max <= 4 ? 1 : Math.ceil(max / 4), top = Math.ceil(max / step) * step;
+  const x = i => L + (dates.length < 2 ? (W - L - R) / 2 : i * (W - L - R) / (dates.length - 1));
+  const y = v => T + (H - T - B) * (1 - v / top);
+  let svg = "";
+  for (let v = 0; v <= top; v += step) {
+    svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>` +
+      `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
   }
-  Object.values(charts).forEach(c => c.destroy());
-  Chart.defaults.color = css("--muted");
-  Chart.defaults.borderColor = css("--border");
-  const palette = ["--s1", "--s2", "--s3", "--s4", "--s5"].map(css);
-  charts.line = new Chart(document.getElementById("line"), {
-    type: "line",
-    data: { labels: DATA.dates.map(d => d.slice(5)),
-            datasets: DATA.stocks.slice(0, 5).map((s, i) => ({ label: s.symbol, data: s.series, borderColor: palette[i],
-              backgroundColor: palette[i], tension: 0.3, pointRadius: DATA.days <= 28 ? 2 : 0, borderWidth: 2 })) },
-    options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-               scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+  const ticks = Math.min(dates.length, Math.max(2, Math.floor((W - L - R) / 64)));
+  const shown = new Set(Array.from({ length: ticks }, (_, k) => Math.round(k * (dates.length - 1) / Math.max(1, ticks - 1))));
+  shown.forEach(i => { svg += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${dates[i].slice(5)}</text>`; });
+  series.forEach(s => {
+    svg += `<polyline fill="none" style="stroke:${s.color}" stroke-width="2" stroke-linejoin="round" ` +
+      `points="${s.data.map((v, i) => `${x(i)},${y(v)}`).join(" ")}"/>`;
+    if (dates.length <= 31) s.data.forEach((v, i) => { svg += `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" style="fill:${s.color}"/>`; });
   });
-  const sec = DATA.sectors.slice(0, 10);
-  charts.sectors = new Chart(document.getElementById("sectors"), {
-    type: "bar",
-    data: { labels: sec.map(s => s.sector), datasets: [{ label: "Buzz", data: sec.map(s => s.buzz),
-            backgroundColor: css("--accent"), borderRadius: 4 }] },
-    options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false } } },
+  const half = dates.length < 2 ? (W - L - R) / 2 : (W - L - R) / (dates.length - 1) / 2;
+  dates.forEach((d, i) => {  // one invisible column per day; hovering it shows that day's counts
+    const tip = `${d}: ` + series.map(s => `${s.label} ${s.data[i]}`).join(", ");
+    svg += `<rect class="hit" x="${x(i) - half}" y="${T}" width="${2 * half}" height="${H - T - B}"><title>${esc(tip)}</title></rect>`;
   });
+  el.innerHTML = `<div class="legend">${series.map(s =>
+      `<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join("")}</div>` +
+    `<svg width="${W}" height="${H}" role="img" aria-label="Daily videos for ${series.map(s => esc(s.label)).join(", ")}">${svg}</svg>`;
 }
+function barChart(el, items) {
+  const max = Math.max(1, ...items.map(s => s.buzz));
+  el.innerHTML = items.map(s => `<div class="bar"><span class="bl" title="${esc(s.sector)}">${esc(s.sector)}</span>` +
+    `<span class="bt"><span style="width:${(100 * s.buzz / max).toFixed(1)}%"></span></span><span class="bv">${s.buzz}</span></div>`
+  ).join("") || `<p class="name">No sectors discussed in this period.</p>`;
+}
+// Over a month of daily counts (mostly 0-2) is just spikes, so longer periods are summed per week, ending today.
+function weekly(dates, series) {
+  const starts = [];
+  for (let end = dates.length; end > 0; end -= 7) starts.unshift(Math.max(0, end - 7));
+  return { dates: starts.map(i => dates[i]),
+           series: series.map(s => ({ ...s, data: starts.map(i => s.data.slice(i, i + 7).reduce((a, b) => a + b, 0)) })) };
+}
+function drawCharts() {
+  const colors = ["--s1", "--s2", "--s3", "--s4", "--s5"].map(v => `var(${v})`);
+  let chart = { dates: DATA.dates,
+                series: DATA.stocks.slice(0, 5).map((s, i) => ({ label: s.symbol, data: s.series, color: colors[i] })) };
+  const byWeek = chart.dates.length > 31;
+  if (byWeek) chart = weekly(chart.dates, chart.series);
+  document.getElementById("lineTitle").textContent =
+    `${byWeek ? "Weekly" : "Daily"} videos mentioning the top 5 stocks${byWeek ? " (week starting)" : ""}`;
+  lineChart(document.getElementById("line"), chart.dates, chart.series);
+  barChart(document.getElementById("sectors"), DATA.sectors.slice(0, 10));
+}
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => DATA && drawCharts(), 150); });
 
 function tone(s) {
   if (s.tone_change === null) {
