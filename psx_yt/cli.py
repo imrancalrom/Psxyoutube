@@ -69,6 +69,7 @@ def cmd_fetch(args, conn):
         fetch_transcripts(conn, retry=args.retry_captions)
 
 
+DEFAULT_DAYS = 90  # look-back for top/report/export; trends still compare the last 7 days with the 7 before
 CAPTION_GRACE = timedelta(days=2)  # YouTube can take a while to auto-generate captions for new uploads
 MAX_FAILURES_IN_A_ROW = 5  # stop early when YouTube is blocking us rather than hammering it
 
@@ -292,7 +293,7 @@ def main(argv=None):
                         help="With --transcripts: try again for videos previously marked as having no captions")
 
     def view_opts(sp):
-        sp.add_argument("--days", type=int, default=30, help="Look-back period in days")
+        sp.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Look-back period in days")
         sp.add_argument("--limit", type=int, default=25, help="Rows to print")
         sp.add_argument("-o", "--output", default="report.html", help="Dashboard HTML file")
 
@@ -307,7 +308,7 @@ def main(argv=None):
     view_opts(s)
     s.set_defaults(func=cmd_report)
     s = sub.add_parser("export", help="Save the leaderboard as CSV or JSON (by file extension)")
-    s.add_argument("--days", type=int, default=30, help="Look-back period in days")
+    s.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Look-back period in days")
     s.add_argument("-o", "--output", default="psx_buzz.csv", help="Output file, .csv or .json")
     s.add_argument("--sectors", action="store_true", help="CSV of sectors instead of stocks")
     s.set_defaults(func=cmd_export)
