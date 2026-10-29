@@ -24,13 +24,20 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (psx-yt-tracker)", "Accept-Language": "en-
 
 
 class YouTubeError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status  # HTTP status when a request failed, else None
 
 
 def _get(url: str, **params) -> requests.Response:
     r = requests.get(url, params=params or None, headers=HEADERS, timeout=30)
     if r.status_code != 200:
-        raise YouTubeError(f"GET {r.url} -> HTTP {r.status_code}: {r.text[:200]}")
+        try:
+            detail = r.json()["error"]["message"]  # the API's own explanation
+        except (ValueError, KeyError, TypeError):
+            detail = r.text[:200]
+        # The query string carries the API key, so leave it out of the message.
+        raise YouTubeError(f"GET {url} -> HTTP {r.status_code}: {detail}", r.status_code)
     return r
 
 
@@ -57,7 +64,10 @@ def resolve_channel(ref: str, api_key: str | None = None) -> tuple[str, str | No
     if m:
         kind, name = m.groups()
         if api_key and kind == "user":
-            data = _get(f"{API}/channels", part="snippet", forUsername=name, key=api_key).json()
+            try:
+                data = _get(f"{API}/channels", part="snippet", forUsername=name, key=api_key).json()
+            except YouTubeError:
+                data = {}  # API refused (bad key, quota...): read the channel page instead
             if data.get("items"):
                 return data["items"][0]["id"], data["items"][0]["snippet"]["title"]
         # The API has no lookup for /c/ custom names, so read the channel page.
@@ -67,11 +77,15 @@ def resolve_channel(ref: str, api_key: str | None = None) -> tuple[str, str | No
         raise YouTubeError(f"Don't understand channel reference {ref!r}; use a UC... id, an @handle or a channel URL")
     handle = m.group(1)
     if api_key:
-        data = _get(f"{API}/channels", part="snippet", forHandle=handle, key=api_key).json()
-        if not data.get("items"):
-            raise YouTubeError(f"No channel found for @{handle}")
-        item = data["items"][0]
-        return item["id"], item["snippet"]["title"]
+        try:
+            data = _get(f"{API}/channels", part="snippet", forHandle=handle, key=api_key).json()
+        except YouTubeError:
+            data = None  # API refused (bad key, quota...): read the channel page instead
+        if data is not None:
+            if not data.get("items"):
+                raise YouTubeError(f"No channel found for @{handle}")
+            item = data["items"][0]
+            return item["id"], item["snippet"]["title"]
     return _scrape_channel_page(f"https://www.youtube.com/@{handle}")
 
 

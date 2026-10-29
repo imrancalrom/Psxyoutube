@@ -44,21 +44,42 @@ def cmd_channels(args, conn):
         print("No channels yet. Add some with: python -m psx_yt add-channel @handle")
 
 
+KEY_REJECTED = {400, 401, 403}  # HTTP statuses meaning the API key is bad, restricted or out of quota
+
+
+def warn(message: str):
+    """Print a warning; inside GitHub Actions also show it on the run's summary page."""
+    print(f"  ! {message}")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning::{message}")
+
+
 def cmd_fetch(args, conn):
     channels = conn.execute("SELECT id, title FROM channels").fetchall()
     if not channels:
         sys.exit("No channels yet. Add some with: python -m psx_yt add-channel @handle")
     mode = "YouTube Data API" if args.api_key else "RSS feed (latest ~15 videos; set YOUTUBE_API_KEY for more)"
     print(f"Fetching {len(channels)} channels via {mode}")
+    api_key = args.api_key
     for ch in channels:
-        try:
-            if args.api_key:
-                title, videos = youtube.fetch_api(ch["id"], args.api_key, args.max)
-            else:
+        name = ch["title"] or ch["id"]
+        videos = None
+        if api_key:
+            try:
+                title, videos = youtube.fetch_api(ch["id"], api_key, args.max)
+            except (youtube.YouTubeError, OSError) as e:
+                print(f"  ! {name}: YouTube Data API failed ({e}); using the RSS feed")
+                if getattr(e, "status", None) in KEY_REJECTED:
+                    # The key itself is the problem, so every channel would fail the same way.
+                    api_key = None
+                    warn(f"YouTube Data API rejected the key ({e}). Fetched the latest ~15 videos per channel "
+                         "from RSS instead; check the YOUTUBE_API_KEY secret and its API restrictions.")
+        if videos is None:
+            try:
                 title, videos = youtube.fetch_rss(ch["id"])
-        except (youtube.YouTubeError, OSError) as e:
-            print(f"  ! {ch['title'] or ch['id']}: {e}")
-            continue
+            except (youtube.YouTubeError, OSError) as e:
+                print(f"  ! {name}: {e}")
+                continue
         db.upsert_channel(conn, ch["id"], title)
         for v in videos:
             v["channel_id"] = ch["id"]
