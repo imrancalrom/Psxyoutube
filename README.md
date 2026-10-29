@@ -75,9 +75,9 @@ during its run); just run the script again. `--no-push --keep out/` saves the fi
 | `channels` | list tracked channels and video counts |
 | `fetch [--transcripts] [--retry-captions] [--max N]` | download video metadata (and captions) |
 | `analyze` | detect stock and sector mentions in all stored videos |
-| `top [--days 30] [--limit 25]` | print the most discussed stocks and sectors |
-| `report [--days 30] [-o report.html]` | write the HTML dashboard |
-| `export [--days 30] [--sectors] [-o psx_buzz.csv]` | save the stock (or sector) leaderboard as CSV (opens in Excel), or everything as `.json` |
+| `top [--days 90] [--limit 25]` | print the most discussed stocks and sectors |
+| `report [--days 90] [-o report.html]` | write the HTML dashboard |
+| `export [--days 90] [--sectors] [-o psx_buzz.csv]` | save the stock (or sector) leaderboard as CSV (opens in Excel), or everything as `.json` |
 | `run` | fetch + analyze + top + report |
 | `demo [--videos 300]` | synthetic data to try the dashboard |
 
@@ -101,7 +101,7 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    negation ("don't buy", "mat khareedo"). Clauses are split on commas and contrast words (*but, vs, lekin, magar,
    لیکن*), so "Buy OGDC, sell PSO" is bullish OGDC and bearish PSO; a clause with no cue words takes the tone of
    its whole sentence ("OGDC, HUBC and PSO: buy all three").
-3. **Trends** (`psx_yt/trends.py`), over the look-back period:
+3. **Trends** (`psx_yt/trends.py`), over the look-back period (90 days by default, `--days N` to change):
    - **Buzz**: sum over videos of `(2 if in title else 1) × (1 + log10(1 + views))`
    - **Last 7d vs prev 7d** video counts give the trend label: `NEW`, `RISING` (≥1.5×), `STEADY`, `FALLING` (≤0.67×)
    - **Sentiment**: share of bullish / neutral / bearish videos, net score from −1 to +1

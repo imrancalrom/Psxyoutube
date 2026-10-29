@@ -124,7 +124,7 @@ def _sector_rows(stock_rows, sector_rows, stocks: dict[str, Stock]) -> list[dict
     return list(merged.values())
 
 
-def compute(conn, stocks: dict[str, Stock], days: int = 30, window: int = 7, today: date | None = None,
+def compute(conn, stocks: dict[str, Stock], days: int = 90, window: int = 7, today: date | None = None,
             min_tone_videos: int = 3) -> dict:
     """Stats for every stock and sector mentioned in the last `days` days.
 
