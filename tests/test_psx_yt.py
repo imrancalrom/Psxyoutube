@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
 from psx_yt import cli, db, youtube
@@ -227,6 +227,28 @@ class FetchFallbackTests(unittest.TestCase):
                 mock.patch.object(youtube, "_scrape_channel_page", return_value=("UCx", "Name")) as page:
             self.assertEqual(resolve_channel("@somehandle", "KEY"), ("UCx", "Name"))
         page.assert_called_once_with("https://www.youtube.com/@somehandle")
+
+
+class ReportTests(unittest.TestCase):
+    def test_dashboard_embeds_every_period(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dbf, out = os.path.join(tmp, "t.db"), os.path.join(tmp, "r.html")
+            conn = db.connect(dbf)
+            db.upsert_channel(conn, "UC1", "Chan 1")
+            for vid, age in (("new", 1), ("old", 40)):
+                day = (date.today() - timedelta(days=age)).isoformat()
+                db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": "Buy OGDC", "published_at": day + "T10:00:00Z"})
+            conn.commit()
+            conn.close()
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["--db", dbf, "analyze"])
+                cli.main(["--db", dbf, "report", "-o", out])
+            html = open(out, encoding="utf-8").read()
+        data, _ = json.JSONDecoder().raw_decode(html.split("const ALL = ", 1)[1])
+        self.assertEqual(sorted(map(int, data["periods"])), [7, 15, 21, 28, 90])
+        self.assertEqual(data["default"], 90)
+        videos = {d: data["periods"][d]["stocks"][0]["videos"] for d in ("7", "90")}
+        self.assertEqual(videos, {"7": 1, "90": 2})  # the 40-day-old video only shows in the 90-day view
 
 
 class CaptionTests(unittest.TestCase):
