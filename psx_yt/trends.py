@@ -105,7 +105,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
                 **new_entry(r),
                 "videos": 0, "mentions": 0, "title_videos": 0, "views": 0, "buzz": 0.0,
                 "bullish": 0, "bearish": 0, "neutral": 0, "hold": 0,
-                "channels": set(), "daily": defaultdict(int), "top_videos": [],
+                "channels": set(), "daily": defaultdict(int), "video_list": [],
             }
         a["videos"] += 1
         a["mentions"] += r["in_title"] + r["in_description"] + r["in_transcript"]
@@ -118,7 +118,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["hold"] += call == "hold"  # neutral videos with an explicit hold call
         a["channels"].add(r["channel_title"] or r["channel_id"])
         a["daily"][d.isoformat()] += 1
-        a["top_videos"].append({
+        a["video_list"].append({
             "id": r["video_id"], "title": r["title"], "channel": r["channel_title"] or r["channel_id"],
             "published": d.isoformat(), "views": r["views"] or 0, "sentiment": tone, "call": call,
         })
@@ -144,8 +144,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["summary"] = summary(a)
         daily = a.pop("daily")
         a["series"] = [daily.get(d, 0) for d in dates]
-        a["top_videos"].sort(key=lambda v: (v["published"], v["views"]), reverse=True)
-        a["top_videos"] = a["top_videos"][:10]
+        a["video_list"].sort(key=lambda v: (v["published"], v["views"]), reverse=True)  # every video in the period
         result.append(a)
     result.sort(key=lambda a: a["buzz"], reverse=True)
     return result

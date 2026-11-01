@@ -120,7 +120,8 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    - channel breadth, total views, daily series, latest videos per stock
    - **Sectors** get the same stats, counting every video that names the sector *or* one of its stocks, so
      "Selling from Banks" and "Buy MEBL" both count for Banks. `Named` is how many videos named the sector itself.
-4. **Dashboard** (`report.html`): leaderboard tiles (including tone improving / worsening most), daily trend chart for the top 5, buzz by sector,
+4. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
+   download or inside app file previews): leaderboard tiles (including tone improving / worsening most), trend chart for the top 5 (daily up to 31 days, weekly for longer periods), buzz by sector,
    a sortable sectors table and a sortable/filterable stocks table; click a row to see the videos behind it.
    A **Period** switch shows the last 7, 15, 21, 28 or 90 days (every view is computed when the report is written, so
    switching is instant; the link remembers it, e.g. `report.html#28`), and the stocks table filters by sector,
