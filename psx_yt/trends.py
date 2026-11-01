@@ -62,7 +62,7 @@ def summary(a: dict) -> str:
         "STEADY": f"steady ({a['recent']} this week)",
         "QUIET": "quiet in the last two weeks",
     }[a["trend"]]
-    counts = ", ".join(f"{c} {w}" for c, w in ((a["bullish"], "buy"), (a["hold"], "hold"), (a["bearish"], "sell")) if c)
+    counts = ", ".join(f"{c} {w}" for c, w in ((a["buy_calls"], "buy"), (a["hold"], "hold"), (a["sell_calls"], "sell")) if c)
     calls = {
         "BUY": f"channels lean BUY ({counts})", "SELL": f"channels lean SELL ({counts})",
         "HOLD": f"mostly HOLD calls ({counts})", "MIXED": f"calls split: {counts}",
@@ -104,7 +104,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
             a = agg[r["key"]] = {
                 **new_entry(r),
                 "videos": 0, "mentions": 0, "title_videos": 0, "views": 0, "buzz": 0.0,
-                "bullish": 0, "bearish": 0, "neutral": 0, "hold": 0,
+                "bullish": 0, "bearish": 0, "neutral": 0, "buy_calls": 0, "sell_calls": 0, "hold": 0,
                 "channels": set(), "daily": defaultdict(int), "video_list": [],
             }
         a["videos"] += 1
@@ -114,8 +114,11 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["buzz"] += (2 if r["in_title"] else 1) * (1 + math.log10(1 + (r["views"] or 0)))
         a["bullish" if r["sentiment"] > 0 else "bearish" if r["sentiment"] < 0 else "neutral"] += 1
         tone = (r["sentiment"] > 0) - (r["sentiment"] < 0)
-        call = "buy" if tone > 0 else "sell" if tone < 0 else "hold" if r["holds"] else ""
-        a["hold"] += call == "hold"  # neutral videos with an explicit hold call
+        # The call is the explicit recommendation, separate from tone ("Sazgar looks undervalued" is upbeat, not a call).
+        call = "buy" if r["calls"] > 0 else "sell" if r["calls"] < 0 else "hold" if r["holds"] else ""
+        a["buy_calls"] += call == "buy"
+        a["sell_calls"] += call == "sell"
+        a["hold"] += call == "hold"
         a["channels"].add(r["channel_title"] or r["channel_id"])
         a["daily"][d.isoformat()] += 1
         a["video_list"].append({
@@ -129,10 +132,10 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["channel_count"] = len(a["channels"])
         a["buzz"] = round(a["buzz"], 1)
         a["sentiment_score"] = round((a["bullish"] - a["bearish"]) / a["videos"], 2)
-        a["call"] = call_label(a["bullish"], a["hold"], a["bearish"], min_calls)
-        calls = a["bullish"] + a["hold"] + a["bearish"]
+        a["call"] = call_label(a["buy_calls"], a["hold"], a["sell_calls"], min_calls)
+        calls = a["buy_calls"] + a["hold"] + a["sell_calls"]
         # Sort key for the call column: share of buy minus share of sell among the videos that made a call.
-        a["call_score"] = round((a["bullish"] - a["bearish"]) / calls, 2) if a["call"] != "-" else None
+        a["call_score"] = round((a["buy_calls"] - a["sell_calls"]) / calls, 2) if a["call"] != "-" else None
         key = a["symbol"] if "symbol" in a else a["sector"]
         a["recent"], a["previous"], net_recent, net_previous = weeks[key]
         a["trend"] = trend_label(a["recent"], a["previous"])
@@ -163,10 +166,10 @@ def _sector_rows(stock_rows, sector_rows, stocks: dict[str, Stock]) -> list[dict
         if m is None:
             m = merged[(r["video_id"], sector)] = {
                 **{k: r[k] for k in ("video_id", "title", "published_at", "views", "channel_id", "channel_title")},
-                "key": sector, "in_title": 0, "in_description": 0, "in_transcript": 0, "sentiment": 0, "holds": 0,
+                "key": sector, "in_title": 0, "in_description": 0, "in_transcript": 0, "sentiment": 0, "holds": 0, "calls": 0,
                 "direct": False, "symbols": set(),
             }
-        for k in ("in_title", "in_description", "in_transcript", "sentiment", "holds"):
+        for k in ("in_title", "in_description", "in_transcript", "sentiment", "holds", "calls"):
             m[k] += r[k]
         if symbol:
             m["symbols"].add(symbol)

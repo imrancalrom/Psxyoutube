@@ -27,14 +27,14 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
            WHERE replace(substr(v.published_at, 1, 19), ' ', 'T') >= ?""", (since,)).fetchall()
     day_ids = [v["id"] for v in day_videos]
     day_mentions = conn.execute(
-        f"""SELECT m.symbol, m.sentiment, m.holds, c.title AS channel FROM mentions m JOIN videos v ON v.id = m.video_id
+        f"""SELECT m.symbol, m.calls, m.holds, c.title AS channel FROM mentions m JOIN videos v ON v.id = m.video_id
             LEFT JOIN channels c ON c.id = v.channel_id WHERE m.video_id IN ({",".join("?" * len(day_ids))})""",
         day_ids).fetchall() if day_ids else []
     day_count = defaultdict(int)
     day_calls = []
     for m in day_mentions:
         day_count[m["symbol"]] += 1
-        call = "buy" if m["sentiment"] > 0 else "sell" if m["sentiment"] < 0 else "hold" if m["holds"] else None
+        call = "buy" if m["calls"] > 0 else "sell" if m["calls"] < 0 else "hold" if m["holds"] else None
         if call:
             day_calls.append(f"{m['symbol']} {call} ({m['channel']})")
     last24 = []
@@ -68,9 +68,9 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
     start = (today - timedelta(days=window - 1)).isoformat()
     calls = defaultdict(lambda: {"buy": 0, "sell": 0, "hold": 0, "channels": set()})
     for m in conn.execute(
-            """SELECT m.symbol, m.sentiment, m.holds, v.channel_id FROM mentions m JOIN videos v ON v.id = m.video_id
-               WHERE substr(v.published_at, 1, 10) >= ? AND (m.sentiment != 0 OR m.holds > 0)""", (start,)):
-        kind = "buy" if m["sentiment"] > 0 else "sell" if m["sentiment"] < 0 else "hold"
+            """SELECT m.symbol, m.calls, m.holds, v.channel_id FROM mentions m JOIN videos v ON v.id = m.video_id
+               WHERE substr(v.published_at, 1, 10) >= ? AND (m.calls != 0 OR m.holds > 0)""", (start,)):
+        kind = "buy" if m["calls"] > 0 else "sell" if m["calls"] < 0 else "hold"
         calls[m["symbol"]][kind] += 1
         calls[m["symbol"]]["channels"].add(m["channel_id"])
 

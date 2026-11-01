@@ -260,16 +260,16 @@ function drawHeader() {
 function drawTiles() {
   const S = DATA.stocks;
   const rising = S.filter(s => s.trend === "RISING" || s.trend === "NEW").sort((a, b) => b.recent - a.recent)[0];
-  const mostBuy = S.filter(s => s.bullish > 0).sort((a, b) => b.bullish - a.bullish || b.call_score - a.call_score)[0];
-  const mostSell = S.filter(s => s.bearish > 0).sort((a, b) => b.bearish - a.bearish || a.call_score - b.call_score)[0];
+  const mostBuy = S.filter(s => s.buy_calls > 0).sort((a, b) => b.buy_calls - a.buy_calls || b.call_score - a.call_score)[0];
+  const mostSell = S.filter(s => s.sell_calls > 0).sort((a, b) => b.sell_calls - a.sell_calls || a.call_score - b.call_score)[0];
   const better = S.filter(s => s.tone_trend === "IMPROVING").sort((a, b) => b.tone_change - a.tone_change)[0];
   const worse = S.filter(s => s.tone_trend === "WORSENING").sort((a, b) => a.tone_change - b.tone_change)[0];
   const tiles = [
     ["Stocks discussed", S.length],
     ["Most discussed", S[0] ? S[0].symbol : "-"],
     ["Fastest rising (7d)", rising ? `${rising.symbol} (${rising.previous}→${rising.recent})` : "-"],
-    ["Most buy calls", mostBuy ? `${mostBuy.symbol} (${mostBuy.bullish})` : "-"],
-    ["Most sell calls", mostSell ? `${mostSell.symbol} (${mostSell.bearish})` : "-"],
+    ["Most buy calls", mostBuy ? `${mostBuy.symbol} (${mostBuy.buy_calls})` : "-"],
+    ["Most sell calls", mostSell ? `${mostSell.symbol} (${mostSell.sell_calls})` : "-"],
     ["Tone improving most (7d)", better ? `${better.symbol} (${signed(better.tone_change)})` : "-"],
     ["Tone worsening most (7d)", worse ? `${worse.symbol} (${signed(worse.tone_change)})` : "-"],
   ];
@@ -344,14 +344,13 @@ function tone(s) {
 function callCell(s) {
   if (s.call === "-") return `<span class="tone d" title="Needs 3+ videos with a buy, hold or sell call">–</span>`;
   return `<span class="tone"><span class="badge ${s.call}">${s.call}</span>` +
-    `<div class="d">${s.bullish} buy · ${s.hold} hold · ${s.bearish} sell</div></span>`;
+    `<div class="d">${s.buy_calls} buy · ${s.hold} hold · ${s.sell_calls} sell</div></span>`;
 }
 function sbar(s) {
   const w = k => (100 * s[k] / s.videos).toFixed(0) + "%";
-  return `<div class="sbar" title="${s.bullish} buy · ${s.hold} hold · ${s.bearish} sell · ${s.neutral - s.hold} just mentioned">` +
+  return `<div class="sbar" title="Tone: ${s.bullish} positive · ${s.neutral} neutral · ${s.bearish} negative">` +
     `<span style="width:${w("bullish")};background:var(--bull)"></span>` +
-    `<span style="width:${w("hold")};background:var(--hold)"></span>` +
-    `<span style="width:${(100 * (s.neutral - s.hold) / s.videos).toFixed(0)}%;background:var(--neutral)"></span>` +
+    `<span style="width:${w("neutral")};background:var(--neutral)"></span>` +
     `<span style="width:${w("bearish")};background:var(--bear)"></span></div>`;
 }
 const FIRST_VIDEOS = 10;

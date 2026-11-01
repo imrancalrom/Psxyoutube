@@ -162,8 +162,9 @@ def cmd_analyze(args, conn):
         for table, found in (("mentions", analyze_video(analyzer, *texts)),
                              ("sector_mentions", analyze_video_sectors(analyzer, *texts))):
             for key, m in found.items():
-                conn.execute(f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (v["id"], key, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"]))
+                conn.execute(f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             (v["id"], key, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"],
+                              m["calls"]))
             if table == "mentions":
                 n_mentions += len(found)
             else:
@@ -174,7 +175,7 @@ def cmd_analyze(args, conn):
 
 def call_cell(s: dict) -> str:
     """'BUY 5/2/1' style: consensus, then buy/hold/sell video counts."""
-    return f"{s['call']:<5} {s['bullish']}/{s['hold']}/{s['bearish']}"
+    return f"{s['call']:<5} {s['buy_calls']}/{s['hold']}/{s['sell_calls']}"
 
 
 def tone_cell(s: dict) -> str:
@@ -222,10 +223,11 @@ def cmd_report(args, conn):
 
 EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
                  "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "tone_recent", "tone_previous",
-                 "tone_change", "tone_trend", "hold", "call", "views", "summary"]
+                 "tone_change", "tone_trend", "buy_calls", "hold", "sell_calls", "call", "views", "summary"]
 SECTOR_EXPORT_FIELDS = ["sector", "buzz", "videos", "direct_videos", "mentions", "title_videos", "channel_count",
                         "recent", "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score",
-                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "hold", "call", "views", "summary"]
+                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "buy_calls", "hold", "sell_calls", "call",
+                        "views", "summary"]
 
 
 def cmd_export(args, conn):

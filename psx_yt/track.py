@@ -37,10 +37,10 @@ def evaluate(conn) -> list[dict]:
     """Every buy/sell call on a priced stock, newest first, with its 5- and 20-day results (None while pending)."""
     prices = _load_prices(conn)
     rows = conn.execute(
-        """SELECT m.symbol, m.sentiment, v.id AS video_id, v.title, substr(v.published_at, 1, 10) AS day,
+        """SELECT m.symbol, m.calls, v.id AS video_id, v.title, substr(v.published_at, 1, 10) AS day,
                   v.channel_id, COALESCE(c.title, v.channel_id) AS channel
            FROM mentions m JOIN videos v ON v.id = m.video_id LEFT JOIN channels c ON c.id = v.channel_id
-           WHERE m.sentiment != 0 ORDER BY v.published_at DESC""").fetchall()
+           WHERE m.calls != 0 ORDER BY v.published_at DESC""").fetchall()
     calls = []
     for r in rows:
         if r["symbol"] not in prices:
@@ -49,7 +49,7 @@ def evaluate(conn) -> list[dict]:
         entry = bisect_right(dates, r["day"])  # first trading day strictly after the video
         if entry >= len(dates):
             continue  # no trading day after it yet
-        side = 1 if r["sentiment"] > 0 else -1
+        side = 1 if r["calls"] > 0 else -1
         call = {"channel": r["channel"], "channel_id": r["channel_id"], "symbol": r["symbol"],
                 "call": "buy" if side > 0 else "sell", "video_id": r["video_id"], "title": r["title"],
                 "published": r["day"], "entry_date": dates[entry], "entry": closes[entry]}
