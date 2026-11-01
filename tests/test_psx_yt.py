@@ -249,6 +249,8 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(data["default"], 90)
         videos = {d: data["periods"][d]["stocks"][0]["videos"] for d in ("7", "90")}
         self.assertEqual(videos, {"7": 1, "90": 2})  # the 40-day-old video only shows in the 90-day view
+        self.assertEqual(sorted(data["videos"]), ["new", "old"])  # each video stored once
+        self.assertEqual([ref[0] for ref in data["periods"]["90"]["stocks"][0]["v"]], ["new", "old"])
 
 
 class CaptionTests(unittest.TestCase):
@@ -345,6 +347,7 @@ class TrendTests(unittest.TestCase):
         self.assertEqual((ogdc["bullish"], ogdc["bearish"]), (2, 1))
         self.assertEqual(ogdc["trend"], "RISING")
         self.assertEqual(sum(ogdc["series"]), 3)
+        self.assertEqual([v["id"] for v in ogdc["video_list"]], ["v1", "v2", "v3"])  # every video, newest first
         # Last 7d: 2 bullish videos -> +1.0; previous 7d has only 1 video, too few for a tone.
         data = compute(conn, load_tickers(), days=30, today=date(2026, 10, 29), min_tone_videos=2)
         ogdc = data["stocks"][0]

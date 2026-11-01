@@ -256,19 +256,26 @@ function sbar(s) {
     `<span style="width:${(100 * (s.neutral - s.hold) / s.videos).toFixed(0)}%;background:var(--neutral)"></span>` +
     `<span style="width:${w("bearish")};background:var(--bear)"></span></div>`;
 }
-function videoList(s) {
-  return `<strong>Channels:</strong> ${s.channels.map(esc).join(", ")}<ul>` +
-    s.top_videos.map(v => `<li>${v.published} · <a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a>
-      — ${esc(v.channel)} · ${fmt(v.views)} views
-      <span class="${{buy: "pos", sell: "neg", hold: "holdc"}[v.call] || ""}">${v.call ? v.call + " call" : "mention"}</span></li>`).join("") +
-    `</ul>`;
+const FIRST_VIDEOS = 10;
+function videoList(s, showAll) {
+  const refs = showAll ? s.v : s.v.slice(0, FIRST_VIDEOS);
+  const more = s.v.length > FIRST_VIDEOS
+    ? `<button type="button" class="link more">${showAll ? `Show the newest ${FIRST_VIDEOS}` : `Show all ${s.v.length} videos`}</button>` : "";
+  return `<strong>Channels:</strong> ${s.channels.map(esc).join(", ")}` +
+    `<div class="name">${s.v.length} video${s.v.length === 1 ? "" : "s"} in the last ${DATA.days} days, newest first</div><ul>` +
+    refs.map(([id, call]) => {
+      const [title, channel, published, views] = ALL.videos[id];
+      return `<li>${published} · <a href="https://www.youtube.com/watch?v=${esc(id)}" target="_blank" rel="noopener">${esc(title)}</a>
+      — ${esc(channel)} · ${fmt(views)} views
+      <span class="${{buy: "pos", sell: "neg", hold: "holdc"}[call] || ""}">${call ? call + " call" : "mention"}</span></li>`;
+    }).join("") + `</ul>${more}`;
 }
 
 // A sortable table whose rows expand to show their videos. rows() is read on every render, so it follows the period.
 function table({ id, rows, key, cells, empty, filter = () => true, onRender = () => {}, note = null }) {
   const el = document.getElementById(id), cols = el.querySelectorAll("thead th").length;
   let sortKey = "buzz", sortDir = -1;
-  const open = new Set();
+  const open = new Set(), showAll = new Set();
   function render() {
     const all = rows();
     const shown = all.filter(filter).sort((a, b) => {
@@ -279,11 +286,13 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
     el.querySelector("tbody").innerHTML = shown.map(s =>
       `<tr class="row${note ? " has-note" : ""}" data-s="${esc(s[key])}">${cells(s)}</tr>` +
       (note ? `<tr class="row note" data-s="${esc(s[key])}"><td colspan="${cols}">${esc(note(s))}</td></tr>` : "") +
-      (open.has(s[key]) ? `<tr class="detail"><td colspan="${cols}">${videoList(s)}</td></tr>` : "")
+      (open.has(s[key]) ? `<tr class="detail" data-s="${esc(s[key])}"><td colspan="${cols}">${videoList(s, showAll.has(s[key]))}</td></tr>` : "")
     ).join("") || `<tr><td colspan="${cols}">${empty}</td></tr>`;
     onRender(shown.length, all.length);
   }
   el.querySelector("tbody").addEventListener("click", e => {
+    const more = e.target.closest("button.more");
+    if (more) { const k = more.closest("tr").dataset.s; showAll.has(k) ? showAll.delete(k) : showAll.add(k); render(); return; }
     const tr = e.target.closest("tr.row"); if (!tr) return;
     const k = tr.dataset.s; open.has(k) ? open.delete(k) : open.add(k); render();
   });
@@ -348,7 +357,19 @@ setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
 
 def write_report(periods: dict[int, dict], path: str | Path, default: int) -> Path:
     """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`."""
-    data = {"periods": {str(d): v for d, v in periods.items()}, "default": default}
+    # Each video's details are stored once; stocks and sectors in every period refer to them by id.
+    videos: dict[str, list] = {}
+
+    def compact(item: dict) -> dict:
+        refs = []
+        for v in item["video_list"]:
+            videos[v["id"]] = [v["title"], v["channel"], v["published"], v["views"]]
+            refs.append([v["id"], v["call"]])
+        return {**{k: x for k, x in item.items() if k != "video_list"}, "v": refs}
+
+    data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
+                                 "sectors": [compact(x) for x in p["sectors"]]} for d, p in periods.items()},
+            "default": default, "videos": videos}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     path = Path(path)
     path.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")
