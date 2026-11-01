@@ -254,7 +254,15 @@ function drawTrack() {
 
 function drawHeader() {
   document.getElementById("sub").textContent = `Last ${DATA.days} days: ${DATA.start} to ${DATA.end} · ` +
-    `${DATA.channel_count} channels · ${DATA.video_count} videos · generated ${DATA.generated}`;
+    `${DATA.channel_count} channels · ${DATA.video_count} videos · generated ${DATA.generated}` + captionNote();
+}
+
+// Most buy/sell calls are spoken, so say how much of the archive has had its captions read.
+function captionNote() {
+  const c = ALL.captions;
+  if (!c || !c.total) return "";
+  const pct = Math.round(100 * (c.read + c.none) / c.total);
+  return ` · captions checked for ${pct}% of videos` + (c.waiting ? ` (${c.waiting} waiting)` : "");
 }
 
 function drawTiles() {
@@ -546,7 +554,7 @@ drawTrack();
 
 
 def write_report(periods: dict[int, dict], path: str | Path, default: int, tech: dict | None = None,
-                 digest: dict | None = None, track: dict | None = None) -> Path:
+                 digest: dict | None = None, track: dict | None = None, captions: dict | None = None) -> Path:
     """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`.
     `tech` maps symbols to prices.technicals() output for the price charts."""
     # Each video's details are stored once; stocks and sectors in every period refer to them by id.
@@ -561,7 +569,8 @@ def write_report(periods: dict[int, dict], path: str | Path, default: int, tech:
 
     data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
                                  "sectors": [compact(x) for x in p["sectors"]]} for d, p in periods.items()},
-            "default": default, "videos": videos, "tech": tech or {}, "digest": digest, "track": track}
+            "default": default, "videos": videos, "tech": tech or {}, "digest": digest, "track": track,
+            "captions": captions}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     path = Path(path)
     path.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")

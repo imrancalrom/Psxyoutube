@@ -89,6 +89,13 @@ def videos_without_transcript(conn) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def caption_stats(conn) -> dict:
+    """How many videos have captions read, have none on YouTube, or are still waiting to be fetched."""
+    r = conn.execute("SELECT COUNT(*), COALESCE(SUM(length(transcript) > 0), 0), COALESCE(SUM(transcript = ''), 0), "
+                     "COALESCE(SUM(transcript IS NULL), 0) FROM videos").fetchone()
+    return {"total": r[0], "read": r[1], "none": r[2], "waiting": r[3]}
+
+
 def reset_empty_transcripts(conn) -> int:
     """Mark videos recorded as caption-less for another try; returns how many."""
     return conn.execute("UPDATE videos SET transcript = NULL WHERE transcript = ''").rowcount

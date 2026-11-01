@@ -78,31 +78,38 @@ normal internet connection (not a phone):
    git config user.email "you@example.com"
    ```
 
-**Each time** (Windows: use `py` instead of `python` if `python` isn't found)
+**Each time**
 
-```bash
-git pull
-python scripts/local_captions.py
-```
+- **Windows**: double-click **`captions.bat`** in the `Psxyoutube` folder.
+- **Mac / Linux**: in a terminal opened in the folder, run `bash captions.sh`.
 
-Each run fetches captions for up to **300 videos, newest first** (about 5–10 minutes), re-runs the analysis and
-pushes the result to the `data` branch; the dashboard shows it after the next workflow run (21:17 PKT, or start one
-from the Actions tab). Run it again for the next 300: the first catch-up of ~2,000 videos takes about seven runs,
-spread over a day or two; after that a run every week or so keeps up. Look for this at the end:
+The launcher updates the code (`git pull`), then fetches captions in **rounds of 300 videos, newest first**
+(about 5–10 minutes each) with a 15-minute pause between rounds, until no video is waiting or YouTube starts
+limiting the connection. Each round re-runs the analysis and is pushed to the `data` branch straight away, so you
+can close the window at any time and lose at most the round in progress. The dashboard shows the new data after the
+next workflow run (21:17 PKT, or start one from the Actions tab); its header and the digest say how many videos have
+had their captions read. The first catch-up of ~2,000 videos takes about seven rounds (roughly three hours if
+YouTube doesn't interrupt); after that, run it every week or so. Each round ends like this:
 
 ```
 Captions: 280 ok, 15 none, 5 blocked, 0 error
 ...
-Done. The next workflow run will start from this data.
+Pushed. The next workflow run (21:17 PKT, or start one from the Actions tab) will show it on the dashboard.
+New buy/sell calls found (6):
+  2026-10-30  BUY  OGDC     Stockifyy: Buy OGDC and PPL ...
+Captions: 580 of 2052 videos read, 40 have none, 1432 still waiting
 ```
 
-- **"blocked" / "stopping, the rest will be tried next run"**: YouTube is limiting your connection. Wait a few
-  hours (or try another network) and run again; nothing is lost.
-- **"The data branch changed while this ran"**: a workflow run finished meanwhile. Just run it again (avoid
-  21:00–21:30 PKT, when the daily run happens).
+- **"YouTube is limiting this connection"**: wait a few hours (or try another network) and run it again; nothing
+  is lost.
+- **"The data branch changed meanwhile"**: the daily workflow finished during the round. The script adds your
+  captions to the newer data and pushes again by itself.
 - **"none"** means the video has no captions; those aren't asked for again (`--retry` asks again).
 
-Options: `--limit 0` fetches every waiting video in one go (YouTube may block a long run), `--retry` retries videos
+Without the launcher: `python scripts/local_captions.py` runs one round; add `--rounds 0` to keep going, `--rounds N`
+for N rounds, `--pause M` for M minutes between rounds.
+
+More options: `--limit N` sets the videos per round (`0` = every waiting video in one go; YouTube may block a long run), `--retry` retries videos
 marked as having no captions, and `--no-push --keep out/` saves the files locally without pushing. Your files and
 current branch are never changed, and the push never overwrites newer data (nor does the workflow overwrite a push
 made during its run).
