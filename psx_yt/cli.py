@@ -8,7 +8,7 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 
-from . import db, prices, youtube
+from . import db, digest, prices, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                        strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
@@ -213,7 +213,7 @@ def cmd_report(args, conn):
         t = prices.technicals([tuple(r) for r in series])
         if t:
             tech[sym] = t
-    path = write_report(periods, args.output, default=args.days, tech=tech)
+    path = write_report(periods, args.output, default=args.days, tech=tech, digest=digest.build(conn, stocks))
     data = periods[args.days]
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors "
           f"over {args.days} days; also {', '.join(str(d) for d in periods if d != args.days)}-day views)")
@@ -279,6 +279,16 @@ def cmd_prices(args, conn):
             print(f"  {sym}: {len(series)} days, {series[0][0]} to {series[-1][0]}, last close {series[-1][1]}")
     conn.commit()
     print(f"Prices: {ok} of {len(symbols)} stocks")
+
+
+def cmd_digest(args, conn):
+    text = digest.markdown(digest.build(conn, load_tickers(args.tickers)))
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"Digest written to {args.output}")
+    else:
+        print(text)
 
 
 def cmd_run(args, conn):
@@ -395,6 +405,9 @@ def main(argv=None):
     s.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Stocks mentioned in this many days")
     s.add_argument("--probe", metavar="SYMBOL", help="Only print what the portal's price endpoints return for SYMBOL")
     s.set_defaults(func=cmd_prices)
+    s = sub.add_parser("digest", help="Print (or save) a short 'what changed' note: last 24 hours and this week")
+    s.add_argument("-o", "--output", help="Markdown file to write instead of printing")
+    s.set_defaults(func=cmd_digest)
     s = sub.add_parser("run", help="fetch + analyze + top + report (+ prices with --prices)")
     fetch_opts(s)
     view_opts(s)

@@ -81,6 +81,11 @@ tr.row:hover { background: var(--bg); }
 .pos { color: var(--bull); } .neg { color: var(--bear); }
 .foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
 .section { margin-bottom: 16px; }
+.digest { margin-bottom: 16px; }
+.digest summary { cursor: pointer; line-height: 1.6; }
+.digest h3 { font-size: 13px; margin: 12px 0 4px; }
+.digest ul { margin: 0; padding-left: 18px; }
+.digest li { margin: 2px 0; }
 .dwrap { position: sticky; left: 8px; width: var(--wrapw, auto); max-width: var(--wrapw, none); }
 .tv { margin: 4px 0 12px; }
 .tvhead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
@@ -109,6 +114,7 @@ tr.row.note:hover { background: none; }
 <main>
   <h1>PSX stocks on YouTube</h1>
   <div class="sub" id="sub"></div>
+  <details class="card digest" id="digest" open></details>
   <div class="toolbar"><span class="lbl">Period</span><div class="seg" id="periods" role="group" aria-label="Period"></div></div>
   <div class="tiles" id="tiles"></div>
   <div class="grid">
@@ -172,6 +178,16 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const signed = n => (n > 0 ? "+" : "") + n.toFixed(2);
+
+function drawDigest() {
+  const d = ALL.digest, el = document.getElementById("digest");
+  if (!d) { el.remove(); return; }
+  el.innerHTML = `<summary><strong>${esc(d.title)}</strong> <span class="name">${esc(d.headline)}</span></summary>` +
+    d.sections.map(s => `<h3>${esc(s.title)}</h3><ul>${s.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>`).join("") +
+    `<div class="name">Always the latest run, whatever period is selected below. What the tracked channels said, detected
+      from keywords; not investment advice.</div>`;
+}
+drawDigest();
 
 function drawHeader() {
   document.getElementById("sub").textContent = `Last ${DATA.days} days: ${DATA.start} to ${DATA.end} · ` +
@@ -496,7 +512,8 @@ setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
 """
 
 
-def write_report(periods: dict[int, dict], path: str | Path, default: int, tech: dict | None = None) -> Path:
+def write_report(periods: dict[int, dict], path: str | Path, default: int, tech: dict | None = None,
+                 digest: dict | None = None) -> Path:
     """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`.
     `tech` maps symbols to prices.technicals() output for the price charts."""
     # Each video's details are stored once; stocks and sectors in every period refer to them by id.
@@ -511,7 +528,7 @@ def write_report(periods: dict[int, dict], path: str | Path, default: int, tech:
 
     data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
                                  "sectors": [compact(x) for x in p["sectors"]]} for d, p in periods.items()},
-            "default": default, "videos": videos, "tech": tech or {}}
+            "default": default, "videos": videos, "tech": tech or {}, "digest": digest}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     path = Path(path)
     path.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")

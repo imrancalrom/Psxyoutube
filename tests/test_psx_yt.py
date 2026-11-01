@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, prices, youtube
+from psx_yt import cli, db, digest, prices, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -287,6 +287,34 @@ class PriceTests(unittest.TestCase):
         self.assertEqual([l["price"] for l in t["resistance"]], [120.0])
         self.assertIn("support 100 (", t["summary"])
         self.assertIsNone(prices.technicals(days[:20]))  # too little history
+
+
+class DigestTests(unittest.TestCase):
+    def test_digest(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        db.upsert_channel(conn, "UC2", "Chan 2")
+        now = datetime(2026, 11, 1, 16, 0, tzinfo=timezone.utc)
+        vids = [("a", "UC1", now - timedelta(hours=2), "Buy OGDC now"),           # last 24h, buy call
+                ("b", "UC2", now - timedelta(days=2), "Buy OGDC, target 300"),   # this week
+                ("c", "UC1", now - timedelta(days=3), "HUBC update"),            # this week
+                ("d", "UC2", now - timedelta(days=4), "HUBC results"),
+                ("e", "UC1", now - timedelta(days=9), "Sell PSO"),               # last week only
+                ("f", "UC1", now - timedelta(days=10), "PSO crash"),
+                ("g", "UC2", now - timedelta(days=40), "HUBC history")]          # older: HUBC isn't new
+        for vid, ch, ts, title in vids:
+            db.upsert_video(conn, {"id": vid, "channel_id": ch, "title": title, "published_at": ts.strftime("%Y-%m-%dT%H:%M:%SZ")})
+        conn.commit()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_analyze(argparse.Namespace(tickers=None), conn)
+        d = digest.build(conn, load_tickers(), now=now)
+        items = {s["title"]: s["items"] for s in d["sections"]}
+        self.assertEqual(items["Last 24 hours"], ["1 new video from 1 channel", "Stocks mentioned: OGDC", "Calls: OGDC buy (Chan 1)"])
+        week = items["This week vs last week"]
+        self.assertIn("Newly discussed (none in the 83 days before): OGDC (2)", week)  # HUBC was discussed 40 days ago
+        self.assertIn("Buzz fading: PSO 2→0", week)
+        self.assertIn("Buy calls this week: OGDC ×2 (2 channels)", week)
+        self.assertIn("**Last 24 hours**", digest.markdown(d))
 
 
 class CaptionTests(unittest.TestCase):

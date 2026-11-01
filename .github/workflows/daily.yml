@@ -1,6 +1,6 @@
 # Daily fetch + analyze + report.
 #
-# The database lives on the `data` branch, with the latest report.html, psx_buzz.csv and psx_sectors.csv.
+# The database lives on the `data` branch, with the latest report.html, psx_buzz.csv, psx_sectors.csv and digest.md.
 # Each run restores it, adds new videos, and replaces that branch with a single fresh commit: the database
 # already holds the full history, so keeping one commit per day would only bloat the repository with old copies.
 #
@@ -90,7 +90,8 @@ jobs:
           python -m psx_yt --db out/psx_yt.db run $flags -o out/report.html | tee out/summary.txt
           python -m psx_yt --db out/psx_yt.db export -o out/psx_buzz.csv
           python -m psx_yt --db out/psx_yt.db export --sectors -o out/psx_sectors.csv
-          { echo '```'; cat out/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python -m psx_yt --db out/psx_yt.db digest -o out/digest.md
+          { cat out/digest.md; echo; echo '```'; cat out/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
@@ -100,6 +101,7 @@ jobs:
             out/report.html
             out/psx_buzz.csv
             out/psx_sectors.csv
+            out/digest.md
           retention-days: 30
 
       - name: Save database to the data branch
@@ -108,8 +110,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git switch --orphan data-new
-          mv out/psx_yt.db out/report.html out/psx_buzz.csv out/psx_sectors.csv .
-          git add -f psx_yt.db report.html psx_buzz.csv psx_sectors.csv
+          mv out/psx_yt.db out/report.html out/psx_buzz.csv out/psx_sectors.csv out/digest.md .
+          git add -f psx_yt.db report.html psx_buzz.csv psx_sectors.csv digest.md
           git commit -q -m "Data as of $(date -u '+%Y-%m-%d %H:%M UTC')"
           # Only replace the data we started from: if scripts/local_captions.py pushed meanwhile, fail rather than
           # drop its captions (the next run starts from them). An empty DATA_BASE means "data must not exist yet".

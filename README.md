@@ -118,6 +118,7 @@ made during its run).
 | `top [--days 90] [--limit 25]` | print the most discussed stocks and sectors |
 | `report [--days 90] [-o report.html]` | write the HTML dashboard |
 | `export [--days 90] [--sectors] [-o psx_buzz.csv]` | save the stock (or sector) leaderboard as CSV (opens in Excel), or everything as `.json` |
+| `digest [-o digest.md]` | short "what changed" note: last 24 hours, this week vs last week, sector shifts |
 | `run` | fetch + analyze + top + report |
 | `demo [--videos 300]` | synthetic data to try the dashboard |
 
@@ -156,7 +157,10 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    - channel breadth, total views, daily series, latest videos per stock
    - **Sectors** get the same stats, counting every video that names the sector *or* one of its stocks, so
      "Selling from Banks" and "Buy MEBL" both count for Banks. `Named` is how many videos named the sector itself.
-4. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
+4. **Daily digest**: each run also writes a short "what changed" note (`digest.md` on the `data` branch, the top of
+   the GitHub run page, and a box at the top of the dashboard): the last 24 hours' videos, stocks and calls; stocks
+   newly discussed this week; buzz rising and fading; this week's buy/hold/sell calls; and sector shifts.
+5. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
    download or inside app file previews): leaderboard tiles (including tone improving / worsening most), trend chart for the top 5 (daily up to 31 days, weekly for longer periods), buzz by sector,
    a sortable sectors table and a sortable/filterable stocks table; click a row to see the videos behind it.
    A **Period** switch shows the last 7, 15, 21, 28 or 90 days (every view is computed when the report is written, so
