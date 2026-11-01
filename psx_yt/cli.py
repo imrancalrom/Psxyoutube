@@ -254,7 +254,7 @@ def cmd_prices(args, conn):
     """Daily closes from Yahoo Finance (<symbol>.KA, checked to be the Karachi listing in PKR) for every stock mentioned
     in the look-back period, for the dashboard's price charts. Failures only skip that stock; after 5 in a row the
     source is assumed unreachable. (The PSX data portal refuses automated requests from GitHub's servers.)"""
-    if args.probe:
+    if getattr(args, "probe", None):  # only the `prices` command has --probe; `run` calls this too
         print("== PSX data portal"); prices.probe(args.probe)
         print("== Yahoo Finance"); prices.probe_yahoo(args.probe)
         return

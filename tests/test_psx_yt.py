@@ -279,6 +279,24 @@ class PriceTests(unittest.TestCase):
         with self.assertRaises(prices.PriceError):  # asked for ATRL, got OGDC
             prices.parse_yahoo("ATRL", self.yahoo())
 
+    def test_price_step_as_called_by_run(self):
+        # `run` passes its own arguments (no --probe); one stock's download fails, the other is stored.
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        today = date.today().isoformat()
+        db.upsert_video(conn, {"id": "v", "channel_id": "UC1", "title": "OGDC and HUBC", "published_at": today + "T10:00:00Z"})
+        conn.commit()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_analyze(argparse.Namespace(tickers=None), conn)
+        series = prices.parse_yahoo("OGDC", self.yahoo())
+        fetch = mock.Mock(side_effect=lambda sym: series if sym == "OGDC" else (_ for _ in ()).throw(prices.PriceError("HTTP 404")))
+        run_args = argparse.Namespace(days=90, transcripts=False, retry_captions=False, max=200, api_key=None, no_prices=False)
+        with mock.patch.object(prices, "fetch_yahoo", fetch), mock.patch.object(cli.time, "sleep"), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            cli.cmd_prices(run_args, conn)
+        self.assertIn("Prices: 1 of 2 stocks", out.getvalue())
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM prices WHERE symbol = 'OGDC'").fetchone()[0], 40)
+
     def test_moving_averages_and_rsi(self):
         self.assertEqual(prices.sma([1, 2, 3, 4, 5], 3), [None, None, 2.0, 3.0, 4.0])
         rising = [float(v) for v in range(1, 40)]
