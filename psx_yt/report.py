@@ -85,6 +85,9 @@ tr.row:hover { background: var(--bg); }
 .tv { margin: 4px 0 12px; }
 .tvhead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
 .tvchart { height: 360px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.tvchart.tall { height: 520px; }
+.tvopt { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; cursor: pointer; }
+.tv > .name { margin-top: 4px; }
 .tvchart .name { padding: 12px; }
 .tsum { font-size: 13px; margin-bottom: 6px; }
 .pchart svg { display: block; overflow: visible; }
@@ -328,7 +331,12 @@ function tradingView(s) {
   const t = ALL.tech[s.symbol];
   const head = `<div class="tvhead"><strong>${esc(s.symbol)} price${t ? ` · last close ${esc(t.date)}` : ""}</strong>
       <a href="${tvPage(s.symbol)}" target="_blank" rel="noopener">Open PSX:${esc(s.symbol)} on TradingView ↗</a></div>`;
-  if (!t) return `<div class="tv">${head}<div class="tvchart" data-symbol="PSX:${esc(s.symbol)}"></div></div>`;
+  if (!t) return `<div class="tv">${head}
+    <label class="tvopt"><input type="checkbox" class="tvind"${tvIndicatorsOn() ? " checked" : ""}> Indicators: support/resistance
+      (Pivot Points Standard), SMA 50 &amp; 200, RSI 14, MACD</label>
+    <div class="tvchart${tvIndicatorsOn() ? " tall" : ""}" data-symbol="PSX:${esc(s.symbol)}"></div>
+    <div class="name">Indicators are drawn by TradingView from its own prices. Pivot points are the classic support (S1–S3) and
+      resistance (R1–R3) levels from the previous period's high, low and close. Not advice.</div></div>`;
   return `<div class="tv">${head}<div class="tsum">${esc(t.summary)}</div>
     <div class="pchart" data-symbol="${esc(s.symbol)}"></div>
     <div class="name">Daily closes for the last ${t.chart.dates.length} trading days with SMA 50 and SMA 200; dashed lines are support
@@ -385,6 +393,22 @@ function priceChart(box, t) {
     `<span><i class="sw sup"></i>Support</span><span><i class="sw res"></i>Resistance</span></div>` +
     `<svg width="${W}" height="${H}" role="img" aria-label="${esc(t.summary)}">${svg}</svg>`;
 }
+// Indicators added to TradingView's chart (TradingView's built-in study ids; it computes them from its own prices).
+const TV_STUDIES = [
+  "PivotPointsStandard@tv-basicstudies",                         // support / resistance levels
+  { id: "MASimple@tv-basicstudies", inputs: { length: 50 } },     // medium-term trend
+  { id: "MASimple@tv-basicstudies", inputs: { length: 200 } },    // long-term trend
+  "RSI@tv-basicstudies",                                          // momentum, 14 days, 70/30
+  "MACD@tv-basicstudies",                                         // trend momentum, 12/26/9
+];
+function tvIndicatorsOn() {
+  try { return localStorage.getItem("tvIndicators") !== "off"; } catch (e) { return true; }
+}
+document.addEventListener("change", e => {
+  if (!e.target.classList.contains("tvind")) return;
+  try { localStorage.setItem("tvIndicators", e.target.checked ? "on" : "off"); } catch (err) { /* private mode */ }
+  renderStocks();  // redraws open stocks, so their charts reload with or without indicators
+});
 function chartFailed(box, why) {
   box.dataset.loaded = "failed";
   box.style.height = "auto";
@@ -410,7 +434,8 @@ function loadCharts(root) {
     script.async = true;
     script.text = JSON.stringify({ symbol: box.dataset.symbol, interval: "D", range: "6M", style: "1", locale: "en",
       theme: dark ? "dark" : "light", autosize: true, hide_side_toolbar: true, allow_symbol_change: false,
-      save_image: false, calendar: false, support_host: "https://www.tradingview.com" });
+      save_image: false, calendar: false, support_host: "https://www.tradingview.com",
+      ...(tvIndicatorsOn() ? { studies: TV_STUDIES } : {}) });
     script.onerror = () => chartFailed(box, "The TradingView chart couldn't load here.");
     box.firstChild.appendChild(script);
     // If nothing has appeared after a while (blocked, or no data for this symbol), say so instead of a blank box.
