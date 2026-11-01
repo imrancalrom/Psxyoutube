@@ -172,9 +172,9 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    resistance (red) levels from swing highs/lows over the past year with how often price touched them, and an RSI 14
    panel with 30/70 bands, plus a one-line summary ("Close 308 (+0.6%) · above SMA 50, below SMA 200 · RSI 62 ·
    support 290 (3×) · resistance 320 (2×)"; MACD 12/26/9, SMA 20 and the 52-week range are in the data too). It
-   needs no internet to view. Stocks without prices show **TradingView**'s chart instead (needs internet) with
-   TradingView's own indicators: Pivot Points Standard (support S1–S3 / resistance R1–R3), SMA 50 and 200, RSI 14 and
-   MACD; an "Indicators" checkbox turns them off (remembered per browser). Every stock links to its TradingView page.
+   needs no internet to view. Every stock links to its chart and overview on **TradingView**'s site, which has PSX
+   prices and indicators (Pivot Points Standard for support/resistance, moving averages, RSI, MACD). TradingView's
+   embeddable chart isn't used: it doesn't carry PSX stocks and silently shows a different company (Apple) instead.
    These are mechanical calculations, not advice.
    Each stock has a one-line summary built from its numbers (also the `summary` column in the CSVs), e.g.
    "23 videos on 8 channels · 3 this week, none the week before · calls split: 3 buy, 3 sell".

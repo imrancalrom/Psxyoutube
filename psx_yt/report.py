@@ -88,12 +88,9 @@ tr.row:hover { background: var(--bg); }
 .digest li { margin: 2px 0; }
 .dwrap { position: sticky; left: 8px; width: var(--wrapw, auto); max-width: var(--wrapw, none); }
 .tv { margin: 4px 0 12px; }
+.tvlinks { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; }
 .tvhead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
-.tvchart { height: 360px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
-.tvchart.tall { height: 520px; }
-.tvopt { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; cursor: pointer; }
 .tv > .name { margin-top: 4px; }
-.tvchart .name { padding: 12px; }
 .tsum { font-size: 13px; margin-bottom: 6px; }
 .pchart svg { display: block; overflow: visible; }
 .pchart svg text { fill: var(--muted); font-size: 11px; }
@@ -343,16 +340,17 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
 // Price section of an opened stock: our own technical chart when the daily run fetched prices (works offline),
 // otherwise TradingView's chart. The TradingView link is always there.
 const tvPage = sym => `https://www.tradingview.com/symbols/PSX-${encodeURIComponent(sym)}/`;
+const tvChart = sym => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent("PSX:" + sym)}`;
 function tradingView(s) {
   const t = ALL.tech[s.symbol];
+  const links = `<a href="${tvChart(s.symbol)}" target="_blank" rel="noopener">Open chart on TradingView ↗</a>
+      <a href="${tvPage(s.symbol)}" target="_blank" rel="noopener">Overview ↗</a>`;
   const head = `<div class="tvhead"><strong>${esc(s.symbol)} price${t ? ` · last close ${esc(t.date)}` : ""}</strong>
-      <a href="${tvPage(s.symbol)}" target="_blank" rel="noopener">Open PSX:${esc(s.symbol)} on TradingView ↗</a></div>`;
+      <span class="tvlinks">${links}</span></div>`;
   if (!t) return `<div class="tv">${head}
-    <label class="tvopt"><input type="checkbox" class="tvind"${tvIndicatorsOn() ? " checked" : ""}> Indicators: support/resistance
-      (Pivot Points Standard), SMA 50 &amp; 200, RSI 14, MACD</label>
-    <div class="tvchart${tvIndicatorsOn() ? " tall" : ""}" data-symbol="PSX:${esc(s.symbol)}"></div>
-    <div class="name">Indicators are drawn by TradingView from its own prices. Pivot points are the classic support (S1–S3) and
-      resistance (R1–R3) levels from the previous period's high, low and close. Not advice.</div></div>`;
+    <div class="name">TradingView's embeddable chart doesn't carry PSX stocks (it shows a different company instead), so the
+      chart opens on TradingView's own site, which has PSX:${esc(s.symbol)} with all its indicators: add Pivot Points
+      Standard for support/resistance, Moving Average (50, 200), RSI and MACD from its Indicators menu.</div></div>`;
   return `<div class="tv">${head}<div class="tsum">${esc(t.summary)}</div>
     <div class="pchart" data-symbol="${esc(s.symbol)}"></div>
     <div class="name">Daily closes for the last ${t.chart.dates.length} trading days with SMA 50 and SMA 200; dashed lines are support
@@ -409,27 +407,6 @@ function priceChart(box, t) {
     `<span><i class="sw sup"></i>Support</span><span><i class="sw res"></i>Resistance</span></div>` +
     `<svg width="${W}" height="${H}" role="img" aria-label="${esc(t.summary)}">${svg}</svg>`;
 }
-// Indicators added to TradingView's chart (TradingView's built-in study ids; it computes them from its own prices).
-const TV_STUDIES = [
-  "PivotPointsStandard@tv-basicstudies",                         // support / resistance levels
-  { id: "MASimple@tv-basicstudies", inputs: { length: 50 } },     // medium-term trend
-  { id: "MASimple@tv-basicstudies", inputs: { length: 200 } },    // long-term trend
-  "RSI@tv-basicstudies",                                          // momentum, 14 days, 70/30
-  "MACD@tv-basicstudies",                                         // trend momentum, 12/26/9
-];
-function tvIndicatorsOn() {
-  try { return localStorage.getItem("tvIndicators") !== "off"; } catch (e) { return true; }
-}
-document.addEventListener("change", e => {
-  if (!e.target.classList.contains("tvind")) return;
-  try { localStorage.setItem("tvIndicators", e.target.checked ? "on" : "off"); } catch (err) { /* private mode */ }
-  renderStocks();  // redraws open stocks, so their charts reload with or without indicators
-});
-function chartFailed(box, why) {
-  box.dataset.loaded = "failed";
-  box.style.height = "auto";
-  box.innerHTML = `<p class="name">${why} Use the TradingView link above to see the chart.</p>`;
-}
 // A row's detail spans the whole (possibly wider than the screen) table, so pin its content to the visible width.
 function fitDetails(tbl) {
   tbl.style.setProperty("--wrapw", Math.max(260, tbl.parentElement.clientWidth - 16) + "px");
@@ -439,23 +416,6 @@ function loadCharts(root) {
   root.querySelectorAll(".pchart:not([data-drawn])").forEach(box => {
     box.dataset.drawn = "1";
     priceChart(box, ALL.tech[box.dataset.symbol]);
-  });
-  root.querySelectorAll(".tvchart:not([data-loaded])").forEach(box => {
-    box.dataset.loaded = "loading";
-    if (!navigator.onLine) return chartFailed(box, "The TradingView chart needs an internet connection.");
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-    box.innerHTML = `<div class="tradingview-widget-container" style="height:100%"><div class="tradingview-widget-container__widget" style="height:100%"></div></div>`;
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.async = true;
-    script.text = JSON.stringify({ symbol: box.dataset.symbol, interval: "D", range: "6M", style: "1", locale: "en",
-      theme: dark ? "dark" : "light", autosize: true, hide_side_toolbar: true, allow_symbol_change: false,
-      save_image: false, calendar: false, support_host: "https://www.tradingview.com",
-      ...(tvIndicatorsOn() ? { studies: TV_STUDIES } : {}) });
-    script.onerror = () => chartFailed(box, "The TradingView chart couldn't load here.");
-    box.firstChild.appendChild(script);
-    // If nothing has appeared after a while (blocked, or no data for this symbol), say so instead of a blank box.
-    setTimeout(() => { if (box.isConnected && !box.querySelector("iframe")) chartFailed(box, "The TradingView chart didn't load."); }, 12000);
   });
 }
 
