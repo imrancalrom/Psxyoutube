@@ -6,6 +6,7 @@ import json
 import os
 import random
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from . import db, digest, prices, youtube
@@ -250,8 +251,9 @@ def cmd_export(args, conn):
 
 
 def cmd_prices(args, conn):
-    """Daily closes from the PSX data portal for every stock mentioned in the look-back period (for the dashboard's
-    price charts). Failures only skip that stock; after 5 in a row the portal is assumed unreachable."""
+    """Daily closes from Yahoo Finance (<symbol>.KA, checked to be the Karachi listing in PKR) for every stock mentioned
+    in the look-back period, for the dashboard's price charts. Failures only skip that stock; after 5 in a row the
+    source is assumed unreachable. (The PSX data portal refuses automated requests from GitHub's servers.)"""
     if args.probe:
         print("== PSX data portal"); prices.probe(args.probe)
         print("== Yahoo Finance"); prices.probe_yahoo(args.probe)
@@ -260,11 +262,12 @@ def cmd_prices(args, conn):
     symbols = [r[0] for r in conn.execute(
         """SELECT DISTINCT m.symbol FROM mentions m JOIN videos v ON v.id = m.video_id
            WHERE substr(v.published_at, 1, 10) >= ? ORDER BY m.symbol""", (since,))]
-    print(f"Fetching daily prices for {len(symbols)} stocks from the PSX data portal")
+    print(f"Fetching daily prices for {len(symbols)} stocks from Yahoo Finance")
     ok = failed_in_a_row = 0
     for sym in symbols:
         try:
-            series = prices.fetch_eod(sym)
+            series = prices.fetch_yahoo(sym)
+            time.sleep(0.3)  # be polite: one request at a time
         except (prices.PriceError, OSError) as e:
             failed_in_a_row += 1
             print(f"  ! {sym}: {e}")
@@ -295,7 +298,7 @@ def cmd_digest(args, conn):
 def cmd_run(args, conn):
     cmd_fetch(args, conn)
     cmd_analyze(args, conn)
-    if args.prices:
+    if not args.no_prices:
         cmd_prices(args, conn)
     cmd_top(args, conn)
     cmd_report(args, conn)
@@ -402,18 +405,17 @@ def main(argv=None):
     s.add_argument("-o", "--output", default="psx_buzz.csv", help="Output file, .csv or .json")
     s.add_argument("--sectors", action="store_true", help="CSV of sectors instead of stocks")
     s.set_defaults(func=cmd_export)
-    s = sub.add_parser("prices", help="Download daily prices from the PSX data portal for the dashboard's charts")
+    s = sub.add_parser("prices", help="Download daily prices (Yahoo Finance) for the dashboard's charts")
     s.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Stocks mentioned in this many days")
     s.add_argument("--probe", metavar="SYMBOL", help="Only print what the portal's price endpoints return for SYMBOL")
     s.set_defaults(func=cmd_prices)
     s = sub.add_parser("digest", help="Print (or save) a short 'what changed' note: last 24 hours and this week")
     s.add_argument("-o", "--output", help="Markdown file to write instead of printing")
     s.set_defaults(func=cmd_digest)
-    s = sub.add_parser("run", help="fetch + analyze + top + report (+ prices with --prices)")
+    s = sub.add_parser("run", help="fetch + analyze + prices + top + report")
     fetch_opts(s)
     view_opts(s)
-    s.add_argument("--prices", action="store_true",
-                   help="Also download prices from the PSX data portal (it refuses automated requests from GitHub's servers)")
+    s.add_argument("--no-prices", action="store_true", help="Skip downloading prices")
     s.set_defaults(func=cmd_run)
     s = sub.add_parser("demo", help="Try it offline with synthetic data (use a separate --db)")
     s.add_argument("--videos", type=int, default=300)

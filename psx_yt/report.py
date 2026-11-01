@@ -355,7 +355,7 @@ function tradingView(s) {
     <div class="pchart" data-symbol="${esc(s.symbol)}"></div>
     <div class="name">Daily closes for the last ${t.chart.dates.length} trading days with SMA 50 and SMA 200; dashed lines are support
       (green) and resistance (red) from swing highs/lows over the past year, with how many times price touched them; lower
-      panel RSI 14 (30/70 bands). Calculated mechanically from closing prices; not advice.</div></div>`;
+      panel RSI 14 (30/70 bands). Prices: Yahoo Finance (${esc(s.symbol)}.KA), daily closes. Calculated mechanically; not advice.</div></div>`;
 }
 function priceChart(box, t) {
   const c = t.chart, n = c.close.length;

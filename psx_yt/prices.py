@@ -78,6 +78,48 @@ def probe(symbol: str) -> None:
 YAHOO_URL = "https://query{n}.finance.yahoo.com/v8/finance/chart/{symbol}.KA"
 
 
+def parse_yahoo(symbol: str, payload) -> list[tuple[str, float, int | None]]:
+    """[(YYYY-MM-DD, close, volume)] oldest first from Yahoo's chart API, after checking the series really is
+    SYMBOL on the Karachi exchange in PKR (raises PriceError otherwise, so another listing is never used).
+
+    Only the daily closes are used: Yahoo's `regularMarketPrice` for PSX stocks disagrees with its own closes
+    (OGDC 131.87 vs a 306.78 close on 30 Oct 2026, when TradingView showed ~308).
+    """
+    chart = payload.get("chart", {}) if isinstance(payload, dict) else {}
+    if chart.get("error"):
+        raise PriceError(f"Yahoo error: {chart['error']}")
+    results = chart.get("result") or []
+    if not results:
+        raise PriceError("Yahoo returned no data")
+    res = results[0]
+    meta = res.get("meta", {})
+    want = {"symbol": f"{symbol}.KA", "exchangeName": "KAR", "currency": "PKR"}
+    got = {k: meta.get(k) for k in want}
+    if got != want:
+        raise PriceError(f"Yahoo series is not {symbol} on the Karachi exchange in PKR: {got}")
+    quote = (res.get("indicators", {}).get("quote") or [{}])[0]
+    out = {}
+    for ts, close, volume in zip(res.get("timestamp") or [], quote.get("close") or [], quote.get("volume") or []):
+        if isinstance(ts, (int, float)) and isinstance(close, (int, float)) and close > 0:
+            day = datetime.fromtimestamp(ts, timezone.utc).date().isoformat()
+            out[day] = (day, round(float(close), 2), int(volume) if isinstance(volume, (int, float)) else None)
+    if len(out) < 30:
+        raise PriceError(f"only {len(out)} daily closes")
+    return sorted(out.values())
+
+
+def fetch_yahoo(symbol: str) -> list[tuple[str, float, int | None]]:
+    r = requests.get(YAHOO_URL.format(n=1, symbol=symbol), params={"range": "2y", "interval": "1d"},
+                     headers=HEADERS, timeout=30)
+    if r.status_code != 200:
+        raise PriceError(f"HTTP {r.status_code}")
+    try:
+        payload = r.json()
+    except ValueError:
+        raise PriceError(f"not JSON: {r.text[:120]!r}") from None
+    return parse_yahoo(symbol, payload)
+
+
 def probe_yahoo(symbol: str) -> None:
     """Print what Yahoo Finance returns for SYMBOL.KA, including what it says the series is (symbol, exchange,
     currency, name), so a wrong match can be spotted before any of it is used."""

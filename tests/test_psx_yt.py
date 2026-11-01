@@ -261,6 +261,24 @@ class PriceTests(unittest.TestCase):
             with self.assertRaises(prices.PriceError):
                 prices.parse_eod(bad)
 
+    def yahoo(self, symbol="OGDC", exchange="KAR", currency="PKR", n=40):
+        ts = [1761868800 - 86400 * i for i in range(n)][::-1]
+        return {"chart": {"error": None, "result": [{
+            "meta": {"symbol": f"{symbol}.KA", "exchangeName": exchange, "currency": currency, "regularMarketPrice": 131.87},
+            "timestamp": ts + [ts[-1] + 86400],
+            "indicators": {"quote": [{"close": [300.0 + i for i in range(n)] + [None], "volume": [1000] * n + [None]}]}}]}}
+
+    def test_parse_yahoo(self):
+        rows = prices.parse_yahoo("OGDC", self.yahoo())
+        self.assertEqual(len(rows), 40)                       # the day with no close is dropped
+        self.assertEqual(rows[-1], ("2025-10-31", 339.0, 1000))  # closes, never regularMarketPrice
+        for bad in (self.yahoo(exchange="NMS"), self.yahoo(currency="USD"), self.yahoo(n=10),
+                    {"chart": {"error": {"code": "Not Found"}, "result": None}}):
+            with self.assertRaises(prices.PriceError):
+                prices.parse_yahoo("OGDC", bad)
+        with self.assertRaises(prices.PriceError):  # asked for ATRL, got OGDC
+            prices.parse_yahoo("ATRL", self.yahoo())
+
     def test_moving_averages_and_rsi(self):
         self.assertEqual(prices.sma([1, 2, 3, 4, 5], 3), [None, None, 2.0, 3.0, 4.0])
         rising = [float(v) for v in range(1, 40)]
