@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, digest, prices, youtube
+from psx_yt import cli, db, digest, prices, track, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -308,6 +308,22 @@ class PriceTests(unittest.TestCase):
         self.assertEqual(kinds({**base, "support": [], "cross": {"kind": "golden", "date": "2026-10-28"}}), ["golden_cross"])
         self.assertEqual(prices.signals(base)[0]["detail"], "99 support (3×), 1.0% above")
 
+    def test_clean_series(self):
+        day = lambda i: f"2026-01-{i + 1:02d}"
+        rows = lambda closes: [(day(i), c, None) for i, c in enumerate(closes)]
+        # A 3-day glitch on another scale (as WTL 1.26 -> 0.12) is dropped.
+        clean, note = prices.clean_series(rows([100, 101, 10.1, 10.2, 10.0, 102, 103]))
+        self.assertEqual([c for _, c, _ in clean], [100, 101, 102, 103])
+        self.assertEqual(note, "3 glitch days dropped")
+        # A lasting change of scale (an unadjusted 5:1 split, as LUCK) keeps only what comes after it.
+        clean, note = prices.clean_series(rows([1400, 1410, 1420, 284, 286, 290, 288]))
+        self.assertEqual([c for _, c, _ in clean], [284, 286, 290, 288])
+        self.assertEqual(note, "3 days before a change of scale dropped")
+        # Normal moves, and a Rs 1 move on a cheap stock (allowed by PSX), are kept.
+        ok = rows([10, 10.9, 10.2, 2.0, 2.9, 2.1])[3:]
+        self.assertEqual(prices.clean_series(rows([100, 109, 99, 104]))[0], rows([100, 109, 99, 104]))
+        self.assertEqual(prices.clean_series(ok)[0], ok)
+
     def test_moving_averages_and_rsi(self):
         self.assertEqual(prices.sma([1, 2, 3, 4, 5], 3), [None, None, 2.0, 3.0, 4.0])
         rising = [float(v) for v in range(1, 40)]
@@ -362,6 +378,36 @@ class DigestTests(unittest.TestCase):
         self.assertIn("Buzz fading: PSO 2→0", week)
         self.assertIn("Buy calls this week: OGDC ×2 (2 channels)", week)
         self.assertIn("**Last 24 hours**", digest.markdown(d))
+
+
+class TrackTests(unittest.TestCase):
+    def test_track_record(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        start = date(2026, 1, 1)
+        days = [(start + timedelta(days=i)).isoformat() for i in range(40)]
+        # OGDC rises 1 a day from 100; PSO falls 1 a day from 200: the "market" is their average.
+        conn.executemany("INSERT INTO prices VALUES (?,?,?,?)",
+                         [("OGDC", d, 100.0 + i, None) for i, d in enumerate(days)] +
+                         [("PSO", d, 200.0 - i, None) for i, d in enumerate(days)])
+        for vid, title, day in (("a", "Buy OGDC", days[0]), ("b", "Sell PSO", days[0]), ("c", "Buy PSO", days[30])):
+            db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "published_at": day + "T18:00:00Z"})
+        conn.commit()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_analyze(argparse.Namespace(tickers=None), conn)
+        t = track.build(conn)
+        calls = {c["video_id"]: c for c in t["calls"]}
+        ogdc = calls["a"]
+        self.assertEqual((ogdc["entry_date"], ogdc["entry"]), (days[1], 101.0))  # the day after the video
+        self.assertEqual((ogdc["move5"], ogdc["right5"]), (round(100 * (106 / 101 - 1), 2), True))
+        self.assertTrue(calls["b"]["right20"])            # a sell call is right when the price falls
+        self.assertIsNone(calls["c"]["move20"])           # too recent for a 20-day result
+        self.assertFalse(calls["c"]["right5"])            # bought PSO, which kept falling
+        everyone = t["channels"][0]
+        self.assertEqual((everyone["channel"], everyone["calls"], everyone["n20"], everyone["pending20"]), ("All channels", 3, 2, 1))
+        self.assertEqual(everyone["hit20"], 100)
+        # Market over OGDC's 20 days = mean of +19.8% and -10.4%; the buy beat it.
+        self.assertGreater(ogdc["move20"], ogdc["market20"])
 
 
 class CaptionTests(unittest.TestCase):

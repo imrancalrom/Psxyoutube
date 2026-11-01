@@ -81,6 +81,8 @@ tr.row:hover { background: var(--bg); }
 .pos { color: var(--bull); } .neg { color: var(--bear); }
 .foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
 .section { margin-bottom: 16px; }
+#tracktbl tr.few td { color: var(--muted); }
+#tracktbl tr.total td { font-weight: 600; }
 .digest { margin-bottom: 16px; }
 .digest summary { cursor: pointer; line-height: 1.6; }
 .digest h3 { font-size: 13px; margin: 12px 0 4px; }
@@ -134,6 +136,25 @@ tr.row.note:hover { background: none; }
       <tbody></tbody>
     </table></div>
     <div class="foot">A sector counts every video that names it ("refineries", "OMCs", "سیمنٹ") or mentions one of its stocks.</div>
+  </div>
+  <div class="card section" id="trackcard">
+    <h2>Channel track record</h2>
+    <div class="tablewrap"><table id="tracktbl">
+      <thead><tr>
+        <th>Channel</th><th class="num" title="Buy / sell calls on stocks with prices">Calls</th>
+        <th class="num" title="Share of calls where the price went the called way after 5 trading days (calls scored)">Right after 5 days</th>
+        <th class="num" title="Share of calls where the price went the called way after 20 trading days (calls scored)">Right after 20 days</th>
+        <th class="num" title="Average 20-day price move in the called direction (a buy that rose 5% and a sell that fell 5% both count +5%)">Avg move, 20 days</th>
+        <th class="num" title="That average minus the average move of all priced stocks over the same days">vs market</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="foot">How each channel's buy and sell calls turned out. A call is entered at the close of the first trading day after the
+      video, and scored 5 and 20 trading days later; "vs market" subtracts the average move of all priced stocks over the same
+      days. Greyed rows have fewer than 5 scored calls: too few to read anything into. Calls are detected from keywords (hold
+      calls have no direction and aren't scored), prices are Yahoo Finance daily closes, and past results don't predict future
+      ones. Click a channel to see its calls: each result is the price move, green when it went the called way (a sell call
+      followed by a fall is green). Covers all stored videos, whatever period is selected above.</div>
   </div>
   <div class="card">
     <h2>All stocks discussed</h2>
@@ -191,6 +212,45 @@ function drawDigest() {
       from keywords; not investment advice.</div>`;
 }
 drawDigest();
+
+// Channel track record: all stored calls, so it doesn't follow the period switch.
+function drawTrack() {
+  const T = ALL.track, el = document.getElementById("tracktbl");
+  if (!T || !T.channels.length || !T.calls.length) { document.getElementById("trackcard").remove(); return; }
+  const [h1, h2] = T.horizons, open = new Set();
+  const pct = (v, signed = true) => v === null || v === undefined ? "–" : `${signed && v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+  const rate = (hit, n) => hit === null ? "–" : `${hit}% <span class="name">of ${n}</span>`;
+  const tone = v => v === null || v === undefined ? "" : v > 0 ? "pos" : v < 0 ? "neg" : "";
+  function calls(channel) {
+    const mine = T.calls.filter(c => channel === "All channels" || c.channel === channel);
+    const res = (c, h) => c["move" + h] === null ? `<span class="name">pending</span>`
+      : `<span class="${c["right" + h] ? "pos" : "neg"}">${pct(c["move" + h])}</span>`;
+    return `<ul>${mine.map(c => `<li>${esc(c.published)} · <strong>${esc(c.symbol)}</strong>
+      <span class="${c.call === "buy" ? "pos" : "neg"}">${c.call}</span> ·
+      <a href="https://www.youtube.com/watch?v=${esc(c.video_id)}" target="_blank" rel="noopener">${esc(c.title)}</a>
+      ${channel === "All channels" ? `— ${esc(c.channel)}` : ""} · entry ${c.entry} (${esc(c.entry_date)}) ·
+      ${h1}d ${res(c, h1)} · ${h2}d ${res(c, h2)}</li>`).join("")}</ul>`;
+  }
+  function render() {
+    el.querySelector("tbody").innerHTML = T.channels.map(r => {
+      const few = r.channel !== "All channels" && !r.enough;
+      return `<tr class="row${few ? " few" : ""}${r.channel === "All channels" ? " total" : ""}" data-s="${esc(r.channel)}">
+        <td>${esc(r.channel)}${few ? ` <span class="name">few calls</span>` : ""}</td>
+        <td class="num">${r.calls} <span class="name">(${r.buy} buy, ${r.sell} sell)</span></td>
+        <td class="num">${rate(r["hit" + h1], r["n" + h1])}</td><td class="num">${rate(r["hit" + h2], r["n" + h2])}</td>
+        <td class="num ${tone(r["avg" + h2])}">${pct(r["avg" + h2])}</td>
+        <td class="num ${tone(r["excess" + h2])}">${pct(r["excess" + h2])}</td></tr>` +
+        (open.has(r.channel) ? `<tr class="detail"><td colspan="6"><div class="dwrap">${calls(r.channel)}</div></td></tr>` : "");
+    }).join("");
+    fitDetails(el);
+  }
+  el.querySelector("tbody").addEventListener("click", e => {
+    if (e.target.closest("a")) return;
+    const tr = e.target.closest("tr.row"); if (!tr) return;
+    const k = tr.dataset.s; open.has(k) ? open.delete(k) : open.add(k); render();
+  });
+  render();
+}
 
 function drawHeader() {
   document.getElementById("sub").textContent = `Last ${DATA.days} days: ${DATA.start} to ${DATA.end} · ` +
@@ -479,6 +539,7 @@ function setPeriod(d) {
 periodBox.addEventListener("click", e => { const b = e.target.closest("button"); if (b) setPeriod(Number(b.dataset.d)); });
 const fromLink = Number(location.hash.slice(1));
 setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
+drawTrack();
 </script>
 </body>
 </html>
@@ -486,7 +547,7 @@ setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
 
 
 def write_report(periods: dict[int, dict], path: str | Path, default: int, tech: dict | None = None,
-                 digest: dict | None = None) -> Path:
+                 digest: dict | None = None, track: dict | None = None) -> Path:
     """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`.
     `tech` maps symbols to prices.technicals() output for the price charts."""
     # Each video's details are stored once; stocks and sectors in every period refer to them by id.
@@ -501,7 +562,7 @@ def write_report(periods: dict[int, dict], path: str | Path, default: int, tech:
 
     data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
                                  "sectors": [compact(x) for x in p["sectors"]]} for d, p in periods.items()},
-            "default": default, "videos": videos, "tech": tech or {}, "digest": digest}
+            "default": default, "videos": videos, "tech": tech or {}, "digest": digest, "track": track}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     path = Path(path)
     path.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")

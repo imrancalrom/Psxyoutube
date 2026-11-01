@@ -101,9 +101,7 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
     # first, then the most discussed.
     by_kind = defaultdict(list)
     for st in data["stocks"]:
-        series = conn.execute("SELECT date, close, volume FROM prices WHERE symbol = ? ORDER BY date",
-                              (st["symbol"],)).fetchall()
-        t = prices.technicals([tuple(r) for r in series])
+        t = prices.technicals(prices.load_series(conn, st["symbol"]))
         hot = st["trend"] in ("RISING", "NEW") and st["recent"] >= 2
         for sg in (t or {}).get("signals", []):
             by_kind[sg["kind"]].append((not hot, -st["buzz"], st["symbol"], sg["detail"], hot))
