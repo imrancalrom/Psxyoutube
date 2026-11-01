@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS sector_mentions (
     holds INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (video_id, sector)
 );
+CREATE TABLE IF NOT EXISTS prices (
+    symbol TEXT NOT NULL,
+    date TEXT NOT NULL,
+    close REAL NOT NULL,
+    volume INTEGER,
+    PRIMARY KEY (symbol, date)
+);
 CREATE INDEX IF NOT EXISTS idx_videos_published ON videos(published_at);
 """
 

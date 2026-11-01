@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, youtube
+from psx_yt import cli, db, prices, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -251,6 +251,42 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(videos, {"7": 1, "90": 2})  # the 40-day-old video only shows in the 90-day view
         self.assertEqual(sorted(data["videos"]), ["new", "old"])  # each video stored once
         self.assertEqual([ref[0] for ref in data["periods"]["90"]["stocks"][0]["v"]], ["new", "old"])
+
+
+class PriceTests(unittest.TestCase):
+    def test_parse_eod(self):
+        rows = prices.parse_eod({"status": 1, "data": [[1761868800, 310.5, 1200, 309], [1761782400000, 308.0, 900]]})
+        self.assertEqual(rows, [("2025-10-30", 308.0, 900), ("2025-10-31", 310.5, 1200)])  # ms or s, oldest first
+        for bad in ({"error": "x"}, {"data": [["2025-10-31", 1]]}, {"data": [[1761868800, -5]]}, []):
+            with self.assertRaises(prices.PriceError):
+                prices.parse_eod(bad)
+
+    def test_moving_averages_and_rsi(self):
+        self.assertEqual(prices.sma([1, 2, 3, 4, 5], 3), [None, None, 2.0, 3.0, 4.0])
+        rising = [float(v) for v in range(1, 40)]
+        self.assertEqual(prices.rsi(rising)[-1], 100.0)
+        zigzag = [100.0 + (1 if i % 2 else -1) for i in range(40)]
+        self.assertTrue(45 <= prices.rsi(zigzag)[-1] <= 55)
+        line, sig, hist = prices.macd(rising)
+        self.assertGreater(line[-1], 0)
+        self.assertAlmostEqual(hist[-1], round(line[-1] - sig[-1], 2), places=1)
+
+    def test_levels_cluster_swing_points(self):
+        # Price bounces between 100 and 120: one support and one resistance level. A swing point needs `window` days
+        # either side to be confirmed, so the first low (day 0) and the last one (2 days from the end) don't count.
+        wave = [100, 104, 108, 112, 116, 120, 116, 112, 108, 104] * 3 + [100, 104, 108]
+        lv = prices.levels([float(v) for v in wave], window=3)
+        self.assertEqual([(l["price"], l["touches"]) for l in lv], [(100.0, 2), (120.0, 3)])
+
+    def test_technicals(self):
+        days = [(f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}", float(v), None)
+                for i, v in enumerate(([100, 104, 108, 112, 116, 120, 116, 112, 108, 104] * 8)[:75])]
+        t = prices.technicals(days)
+        self.assertEqual(t["close"], days[-1][1])
+        self.assertEqual([l["price"] for l in t["support"]], [100.0])
+        self.assertEqual([l["price"] for l in t["resistance"]], [120.0])
+        self.assertIn("support 100 (", t["summary"])
+        self.assertIsNone(prices.technicals(days[:20]))  # too little history
 
 
 class CaptionTests(unittest.TestCase):

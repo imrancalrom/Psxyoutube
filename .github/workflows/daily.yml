@@ -22,6 +22,10 @@ on:
         description: Retry videos earlier marked as having no captions (needs captions on)
         type: boolean
         default: false
+      probe_prices:
+        description: Only print what the PSX portal's price endpoints return for OGDC (diagnostic; no data saved)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -46,7 +50,13 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: Probe PSX price endpoints (diagnostic)
+        if: ${{ inputs.probe_prices }}
+        run: |
+          python -m psx_yt --db probe.db prices --probe OGDC
+
       - name: Restore database from the data branch
+        if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
         run: |
           mkdir -p out
           if git fetch --depth=1 origin data 2>/dev/null; then
@@ -58,6 +68,7 @@ jobs:
           fi
 
       - name: Add channels from channels.txt
+        if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
         run: |
           if [ ! -f channels.txt ]; then
             echo "::error::No channels.txt in the repository. Copy channels.example.txt, list your channels and commit it."
@@ -66,6 +77,7 @@ jobs:
           python -m psx_yt --db out/psx_yt.db add-channel --file channels.txt
 
       - name: Fetch, analyze and report
+        if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
         run: |
           set -o pipefail  # so a failing run isn't hidden by tee
           flags=""
@@ -81,6 +93,7 @@ jobs:
           { echo '```'; cat out/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
         with:
           name: psx-yt-report
           path: |
@@ -90,6 +103,7 @@ jobs:
           retention-days: 30
 
       - name: Save database to the data branch
+        if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
