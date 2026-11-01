@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, digest, prices, youtube
+from psx_yt import cli, db, digest, prices, track, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -17,8 +17,8 @@ from psx_yt.trends import call_label, compute, summary, tone_label, trend_label
 from psx_yt.youtube import parse_rss, resolve_channel
 
 ANALYZER = Analyzer(load_tickers())
-INSERT_MENTION = ("INSERT INTO mentions (video_id, symbol, in_title, in_description, in_transcript, sentiment, holds) "
-                  "VALUES (?,?,?,?,?,?,?)")
+INSERT_MENTION = ("INSERT INTO mentions (video_id, symbol, in_title, in_description, in_transcript, sentiment, holds, "
+                  "calls) VALUES (?,?,?,?,?,?,?,?)")
 
 
 def symbols(text):
@@ -77,7 +77,7 @@ class SentimentTests(unittest.TestCase):
         self.assertEqual(self.tone("Weekly review | OGDC, HUBC discussed"), [("OGDC", 0), ("HUBC", 0)])
 
     def calls(self, text):
-        return [(m.symbol, m.sentiment, m.hold) for m in ANALYZER.find_mentions(text)]
+        return [(m.symbol, m.call, m.hold) for m in ANALYZER.find_mentions(text)]
 
     def test_hold_calls(self):
         self.assertEqual(self.calls("Hold OGDC for now"), [("OGDC", 0, 1)])
@@ -93,9 +93,33 @@ class SentimentTests(unittest.TestCase):
         self.assertEqual(self.calls("Lucky Cement sales hold steady"), [("LUCK", 0, 0)])
         self.assertEqual(self.calls("Property holding vs REITs: TPL Properties"), [("TPLP", 0, 0)])
 
+    def test_calls_are_explicit_recommendations(self):
+        tone_call = lambda t: [(m.symbol, m.sentiment, m.call) for m in ANALYZER.find_mentions(t)]
+        self.assertEqual(tone_call("Buy OGDC, sell PSO"), [("OGDC", 1, 1), ("PSO", -1, -1)])
+        self.assertEqual(tone_call("PIBTL price target 23"), [("PIBTL", 0, 1)])
+        self.assertEqual(tone_call("Sazgar Looks Undervalued"), [("SAZEW", 1, 0)])          # upbeat, not a call
+        self.assertEqual(tone_call("Foreign Buying & SAZEW Analysis"), [("SAZEW", 1, 0)])          # a money flow
+        self.assertEqual(tone_call("Selling pressure on MEBL"), [("MEBL", -1, 0)])
+        self.assertEqual(tone_call("We break down the factors behind SAZEW"), [("SAZEW", 0, 0)])  # "explain"
+        self.assertEqual(tone_call("OGDC breaks below support"), [("OGDC", -1, 0)])
+        self.assertEqual(tone_call("Importance of STOP LOSS, explained with PSO"), [("PSO", 0, 0)])
+        self.assertEqual(tone_call("ENGROH dividend policy and payout"), [("ENGROH", 0, 0)])
+        self.assertEqual(tone_call("KEL & FFC | BUY & SELL & HOLD"), [("KEL", 0, 0), ("FFC", 0, 0)])  # the options
+        self.assertEqual(tone_call("FFC BUY & HOLD"), [("FFC", 1, 1)])
+        self.assertEqual(tone_call("A tax on buying and selling, and a view of KAPCO"), [("KAPCO", 0, 0)])
+        self.assertEqual(tone_call("How to buy MEBL shares"), [("MEBL", 1, 0)])
+        self.assertEqual(tone_call("Retail traders are buying NBP"), [("NBP", 1, 0)])
+        self.assertEqual(tone_call("Fauji Foods has accumulated losses"), [("FFL", 0, 0)])
+        self.assertEqual(tone_call("ENGROH ENTRY OR EXIT"), [("ENGROH", 0, 0)])
+        self.assertEqual(tone_call("How to find multibagger stocks like HUBC"), [("HUBC", 1, 0)])
+        self.assertEqual(tone_call("SAZEW MULTIBAGGER"), [("SAZEW", 1, 1)])
+        self.assertEqual(tone_call("They sell raw milk to Nestle"), [("NESTLE", -1, 0)])
+        self.assertEqual(tone_call("Accumulate FFL on dips"), [("FFL", 1, 1)])
+        self.assertEqual(tone_call("Is OGDC still undervalued? Buy OGDC"), [("OGDC", 0, 0), ("OGDC", 1, 1)])  # questions
+
     def test_analyze_video_sources(self):
         out = analyze_video(ANALYZER, "OGDC breakout", "OGDC and PPL details", None)
-        self.assertEqual(out["OGDC"], {"title": 1, "description": 1, "transcript": 0, "sentiment": 1, "holds": 0})
+        self.assertEqual(out["OGDC"], {"title": 1, "description": 1, "transcript": 0, "sentiment": 1, "holds": 0, "calls": 0})  # upbeat, no call
         self.assertNotIn("PPL", out)  # untagged PPL is ambiguous
 
 
@@ -308,6 +332,22 @@ class PriceTests(unittest.TestCase):
         self.assertEqual(kinds({**base, "support": [], "cross": {"kind": "golden", "date": "2026-10-28"}}), ["golden_cross"])
         self.assertEqual(prices.signals(base)[0]["detail"], "99 support (3×), 1.0% above")
 
+    def test_clean_series(self):
+        day = lambda i: f"2026-01-{i + 1:02d}"
+        rows = lambda closes: [(day(i), c, None) for i, c in enumerate(closes)]
+        # A 3-day glitch on another scale (as WTL 1.26 -> 0.12) is dropped.
+        clean, note = prices.clean_series(rows([100, 101, 10.1, 10.2, 10.0, 102, 103]))
+        self.assertEqual([c for _, c, _ in clean], [100, 101, 102, 103])
+        self.assertEqual(note, "3 glitch days dropped")
+        # A lasting change of scale (an unadjusted 5:1 split, as LUCK) keeps only what comes after it.
+        clean, note = prices.clean_series(rows([1400, 1410, 1420, 284, 286, 290, 288]))
+        self.assertEqual([c for _, c, _ in clean], [284, 286, 290, 288])
+        self.assertEqual(note, "3 days before a change of scale dropped")
+        # Normal moves, and a Rs 1 move on a cheap stock (allowed by PSX), are kept.
+        ok = rows([10, 10.9, 10.2, 2.0, 2.9, 2.1])[3:]
+        self.assertEqual(prices.clean_series(rows([100, 109, 99, 104]))[0], rows([100, 109, 99, 104]))
+        self.assertEqual(prices.clean_series(ok)[0], ok)
+
     def test_moving_averages_and_rsi(self):
         self.assertEqual(prices.sma([1, 2, 3, 4, 5], 3), [None, None, 2.0, 3.0, 4.0])
         rising = [float(v) for v in range(1, 40)]
@@ -362,6 +402,36 @@ class DigestTests(unittest.TestCase):
         self.assertIn("Buzz fading: PSO 2→0", week)
         self.assertIn("Buy calls this week: OGDC ×2 (2 channels)", week)
         self.assertIn("**Last 24 hours**", digest.markdown(d))
+
+
+class TrackTests(unittest.TestCase):
+    def test_track_record(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        start = date(2026, 1, 1)
+        days = [(start + timedelta(days=i)).isoformat() for i in range(40)]
+        # OGDC rises 1 a day from 100; PSO falls 1 a day from 200: the "market" is their average.
+        conn.executemany("INSERT INTO prices VALUES (?,?,?,?)",
+                         [("OGDC", d, 100.0 + i, None) for i, d in enumerate(days)] +
+                         [("PSO", d, 200.0 - i, None) for i, d in enumerate(days)])
+        for vid, title, day in (("a", "Buy OGDC", days[0]), ("b", "Sell PSO", days[0]), ("c", "Buy PSO", days[30])):
+            db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "published_at": day + "T18:00:00Z"})
+        conn.commit()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_analyze(argparse.Namespace(tickers=None), conn)
+        t = track.build(conn)
+        calls = {c["video_id"]: c for c in t["calls"]}
+        ogdc = calls["a"]
+        self.assertEqual((ogdc["entry_date"], ogdc["entry"]), (days[1], 101.0))  # the day after the video
+        self.assertEqual((ogdc["move5"], ogdc["right5"]), (round(100 * (106 / 101 - 1), 2), True))
+        self.assertTrue(calls["b"]["right20"])            # a sell call is right when the price falls
+        self.assertIsNone(calls["c"]["move20"])           # too recent for a 20-day result
+        self.assertFalse(calls["c"]["right5"])            # bought PSO, which kept falling
+        everyone = t["channels"][0]
+        self.assertEqual((everyone["channel"], everyone["calls"], everyone["n20"], everyone["pending20"]), ("All channels", 3, 2, 1))
+        self.assertEqual(everyone["hit20"], 100)
+        # Market over OGDC's 20 days = mean of +19.8% and -10.4%; the buy beat it.
+        self.assertGreater(ogdc["move20"], ogdc["market20"])
 
 
 class CaptionTests(unittest.TestCase):
@@ -436,13 +506,13 @@ class TrendTests(unittest.TestCase):
         self.assertEqual(call_label(1, 0, 1), "-")      # too few calls
 
     def test_summary(self):
-        base = {"videos": 13, "channel_count": 6, "recent": 3, "previous": 0, "trend": "NEW", "bullish": 2, "hold": 0,
-                "bearish": 2, "call": "MIXED", "tone_trend": "-"}
+        base = {"videos": 13, "channel_count": 6, "recent": 3, "previous": 0, "trend": "NEW", "buy_calls": 2, "hold": 0,
+                "sell_calls": 2, "call": "MIXED", "tone_trend": "-"}
         self.assertEqual(summary(base), "13 videos on 6 channels · 3 this week, none the week before · calls split: 2 buy, 2 sell")
-        self.assertEqual(summary({**base, "videos": 1, "channel_count": 1, "recent": 1, "bullish": 0, "bearish": 0,
+        self.assertEqual(summary({**base, "videos": 1, "channel_count": 1, "recent": 1, "buy_calls": 0, "sell_calls": 0,
                                   "call": "-"}),
                          "1 video on 1 channel only · new this week (1) · no buy/sell calls yet")
-        self.assertEqual(summary({**base, "trend": "RISING", "previous": 1, "bullish": 4, "bearish": 1, "call": "BUY",
+        self.assertEqual(summary({**base, "trend": "RISING", "previous": 1, "buy_calls": 4, "sell_calls": 1, "call": "BUY",
                                   "tone_trend": "IMPROVING"}),
                          "13 videos on 6 channels · buzz rising (1→3 a week) · channels lean BUY (4 buy, 1 sell) · tone improving")
 
@@ -456,13 +526,13 @@ class TrendTests(unittest.TestCase):
         conn = db.connect(":memory:")
         db.upsert_channel(conn, "UC1", "Chan 1")
         vids = [("v1", "2026-10-28T10:00:00Z", "Buy OGDC now", 1000),
-                ("v2", "2026-10-27T10:00:00Z", "OGDC target", 100),
+                ("v2", "2026-10-27T10:00:00Z", "OGDC breakout", 100),
                 ("v3", "2026-10-20T10:00:00Z", "OGDC sell", 10)]
         for vid, ts, title, views in vids:
             db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "published_at": ts, "views": views})
             for sym, m in analyze_video(ANALYZER, title, "", None).items():
                 conn.execute(INSERT_MENTION,
-                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"]))
+                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"], m["calls"]))
         data = compute(conn, load_tickers(), days=30, today=date(2026, 10, 29))
         ogdc = data["stocks"][0]
         self.assertEqual((ogdc["symbol"], ogdc["videos"], ogdc["recent"], ogdc["previous"]), ("OGDC", 3, 2, 1))
@@ -485,7 +555,7 @@ class TrendTests(unittest.TestCase):
             db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "published_at": day + "T10:00:00Z"})
             for sym, m in analyze_video(ANALYZER, title, "", None).items():
                 conn.execute(INSERT_MENTION,
-                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"]))
+                             (vid, sym, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"], m["calls"]))
         ogdc = compute(conn, load_tickers(), days=30, today=date(2026, 10, 29), min_tone_videos=2)["stocks"][0]
         self.assertEqual((ogdc["tone_previous"], ogdc["tone_recent"], ogdc["tone_change"], ogdc["tone_trend"]),
                          (-1.0, 0.5, 1.5, "IMPROVING"))

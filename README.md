@@ -142,12 +142,19 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    (*buy, breakout, target, tezi, khareedain, منافع* vs *sell, crash, avoid, girawat, mandi, نقصان*), with simple
    negation ("don't buy", "mat khareedo"). Clauses are split on commas and contrast words (*but, vs, lekin, magar,
    لیکن*), so "Buy OGDC, sell PSO" is bullish OGDC and bearish PSO; a clause with no cue words takes the tone of
-   its whole sentence ("OGDC, HUBC and PSO: buy all three").
+   its whole sentence ("OGDC, HUBC and PSO: buy all three"). Questions ("Is OGDC still undervalued?") and lists of
+   options ("BUY & SELL & HOLD", "entry or exit") carry no tone.
+   **Tone and calls are kept apart.** Tone uses the broad word list above and feeds the sentiment bar and tone trend.
+   A *call* needs an explicit recommendation: *buy, accumulate, top pick, multibagger, price target 23, khareedain*
+   vs *sell, avoid, exit, book profits, becho*. Market descriptions don't count as calls: money flows ("foreign
+   buying", "selling pressure", "retail traders are buying"), how-to phrases ("how to buy", "buy order", "buying and
+   selling", "how to find multibagger stocks"), "we break down…", "stop loss" and dividend news. Calls drive the
+   YouTube call column, the digest's call lines and the channel track record.
 3. **Trends** (`psx_yt/trends.py`), over the look-back period (90 days by default, `--days N` to change):
    - **Buzz**: sum over videos of `(2 if in title else 1) × (1 + log10(1 + views))`
    - **Last 7d vs prev 7d** video counts give the trend label: `NEW`, `RISING` (≥1.5×), `STEADY`, `FALLING` (≤0.67×)
    - **Sentiment**: share of bullish / neutral / bearish videos, net score from −1 to +1
-   - **YouTube call**: how many videos made a buy, hold or sell call ("hold", "keep holding", "stay invested",
+   - **YouTube call**: how many videos made an explicit buy, hold or sell call ("hold", "keep holding", "stay invested",
      "hold karein/rakhein", "ہولڈ" are hold calls; buy or sell in the same clause wins, and "holding company" or
      "Engro Holdings" don't count). The label is `BUY`, `HOLD` or `SELL` when one call has at least half of 3+ calls,
      `MIXED` otherwise, `-` with fewer. It reports what the channels said; it is not a recommendation.
@@ -161,7 +168,14 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    the GitHub run page, and a box at the top of the dashboard): the last 24 hours' videos, stocks and calls; stocks
    newly discussed this week; buzz rising and fading; this week's buy/hold/sell calls; sector shifts; and
    **technical signals** for the discussed stocks, those whose buzz is rising first.
-5. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
+5. **Channel track record** (`psx_yt/track.py`): every buy/sell call on a stock with prices is entered at the close
+   of the first trading day after the video and scored 5 and 20 trading days later: the share that went the called
+   way, the average move in the called direction, and that minus the average move of all priced stocks over the same
+   days ("vs market"). Channels with fewer than 5 scored calls are greyed; hold calls aren't scored. Prices are
+   cleaned first: Yahoo's PSX history switches between split-adjusted and unadjusted prices and has short glitches,
+   so moves beyond PSX's daily limit (10%, or Rs 1) are dropped as glitches or, if lasting, only the data after them
+   is kept. The scores are only as good as the keyword call detection, and past results don't predict future ones.
+6. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
    download or inside app file previews): leaderboard tiles (including tone improving / worsening most), trend chart for the top 5 (daily up to 31 days, weekly for longer periods), buzz by sector,
    a sortable sectors table and a sortable/filterable stocks table; click a row to see the videos behind it.
    A **Period** switch shows the last 7, 15, 21, 28 or 90 days (every view is computed when the report is written, so
@@ -198,6 +212,7 @@ python -m unittest -v
 
 ## Limits
 
-- Sentiment is keyword based: sarcasm, questions ("should you buy?") and tone carried across sentences are missed.
+- Tone and calls are keyword based: sarcasm and meaning carried across sentences are missed. Calls are deliberately
+  strict, so they miss some real recommendations rather than count descriptions as calls; with captions more are found.
 - Without transcripts only titles and descriptions are read, so stocks discussed only verbally are missed.
 - Not investment advice.

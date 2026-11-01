@@ -108,6 +108,51 @@ def parse_yahoo(symbol: str, payload) -> list[tuple[str, float, int | None]]:
     return sorted(out.values())
 
 
+def impossible(prev: float, cur: float) -> bool:
+    """A day-to-day move PSX's circuit breaker wouldn't allow (10%, or Rs 1 for cheap stocks), with some slack."""
+    return abs(cur - prev) > max(0.11 * prev, 1.05)
+
+
+def clean_series(rows: list[tuple[str, float, int | None]], max_glitch: int = 10):
+    """(cleaned rows, note) for a price series with impossible jumps: Yahoo's PSX history switches between split-
+    adjusted and unadjusted prices (LUCK 284 -> 1412 -> 292) and has short glitches (WTL 1.26 -> 0.12 for a few days).
+
+    A jump that comes back within `max_glitch` days is a glitch and those days are dropped; a jump that doesn't come
+    back is a change of scale, and only the data after the last one is kept, so prices on two scales are never mixed.
+    """
+    rows = list(rows)
+    dropped = 0
+    i = 1
+    while i < len(rows):
+        if impossible(rows[i - 1][1], rows[i][1]):
+            base = rows[i - 1][1]
+            back = next((j for j in range(i + 1, min(i + 1 + max_glitch, len(rows)))
+                         if not impossible(base, rows[j][1])), None)
+            if back is not None:  # a glitch: the price returns to where it was
+                dropped += back - i
+                del rows[i:back]
+                continue
+        i += 1
+    breaks = [i for i in range(1, len(rows)) if impossible(rows[i - 1][1], rows[i][1])]
+    cut = 0
+    if breaks:  # a lasting change of scale: keep only what comes after it
+        cut = breaks[-1]
+        rows = rows[cut:]
+    note = ", ".join(x for x in (f"{dropped} glitch days dropped" if dropped else "",
+                                 f"{cut} days before a change of scale dropped" if cut else "") if x)
+    return rows, note
+
+
+def load_series(conn, symbol: str) -> list[tuple[str, float, int | None]]:
+    """A stock's stored daily prices, oldest first, cleaned (every reader goes through this)."""
+    rows = conn.execute("SELECT date, close, volume FROM prices WHERE symbol = ? ORDER BY date", (symbol,)).fetchall()
+    return clean_series([tuple(r) for r in rows])[0]
+
+
+def priced_symbols(conn) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT DISTINCT symbol FROM prices ORDER BY symbol")]
+
+
 def fetch_yahoo(symbol: str) -> list[tuple[str, float, int | None]]:
     r = requests.get(YAHOO_URL.format(n=1, symbol=symbol), params={"range": "2y", "interval": "1d"},
                      headers=HEADERS, timeout=30)

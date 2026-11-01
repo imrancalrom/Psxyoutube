@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import db, digest, prices, youtube
+from . import db, digest, prices, track, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                        strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
@@ -162,8 +162,9 @@ def cmd_analyze(args, conn):
         for table, found in (("mentions", analyze_video(analyzer, *texts)),
                              ("sector_mentions", analyze_video_sectors(analyzer, *texts))):
             for key, m in found.items():
-                conn.execute(f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (v["id"], key, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"]))
+                conn.execute(f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             (v["id"], key, m["title"], m["description"], m["transcript"], m["sentiment"], m["holds"],
+                              m["calls"]))
             if table == "mentions":
                 n_mentions += len(found)
             else:
@@ -174,7 +175,7 @@ def cmd_analyze(args, conn):
 
 def call_cell(s: dict) -> str:
     """'BUY 5/2/1' style: consensus, then buy/hold/sell video counts."""
-    return f"{s['call']:<5} {s['bullish']}/{s['hold']}/{s['bearish']}"
+    return f"{s['call']:<5} {s['buy_calls']}/{s['hold']}/{s['sell_calls']}"
 
 
 def tone_cell(s: dict) -> str:
@@ -210,11 +211,11 @@ def cmd_report(args, conn):
     periods = {d: compute(conn, stocks, days=d) for d in sorted({*REPORT_PERIODS, args.days})}
     tech = {}
     for sym in {x["symbol"] for p in periods.values() for x in p["stocks"]}:
-        series = conn.execute("SELECT date, close, volume FROM prices WHERE symbol = ? ORDER BY date", (sym,)).fetchall()
-        t = prices.technicals([tuple(r) for r in series])
+        t = prices.technicals(prices.load_series(conn, sym))
         if t:
             tech[sym] = t
-    path = write_report(periods, args.output, default=args.days, tech=tech, digest=digest.build(conn, stocks))
+    path = write_report(periods, args.output, default=args.days, tech=tech, digest=digest.build(conn, stocks),
+                        track=track.build(conn))
     data = periods[args.days]
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors "
           f"over {args.days} days; also {', '.join(str(d) for d in periods if d != args.days)}-day views)")
@@ -222,10 +223,11 @@ def cmd_report(args, conn):
 
 EXPORT_FIELDS = ["symbol", "name", "sector", "buzz", "videos", "mentions", "title_videos", "channel_count", "recent",
                  "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score", "tone_recent", "tone_previous",
-                 "tone_change", "tone_trend", "hold", "call", "views", "summary"]
+                 "tone_change", "tone_trend", "buy_calls", "hold", "sell_calls", "call", "views", "summary"]
 SECTOR_EXPORT_FIELDS = ["sector", "buzz", "videos", "direct_videos", "mentions", "title_videos", "channel_count",
                         "recent", "previous", "trend", "bullish", "neutral", "bearish", "sentiment_score",
-                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "hold", "call", "views", "summary"]
+                        "tone_recent", "tone_previous", "tone_change", "tone_trend", "buy_calls", "hold", "sell_calls", "call",
+                        "views", "summary"]
 
 
 def cmd_export(args, conn):
@@ -277,7 +279,12 @@ def cmd_prices(args, conn):
                 break
             continue
         failed_in_a_row = 0
-        conn.executemany("INSERT OR REPLACE INTO prices VALUES (?, ?, ?, ?)", [(sym, *row) for row in series])
+        series, note = prices.clean_series(series)
+        if note:
+            print(f"  {sym}: cleaned ({note})")
+        # Replace the whole history, so rows from an earlier download that no longer pass don't linger.
+        conn.execute("DELETE FROM prices WHERE symbol = ?", (sym,))
+        conn.executemany("INSERT INTO prices VALUES (?, ?, ?, ?)", [(sym, *row) for row in series])
         ok += 1
         if ok == 1:
             print(f"  {sym}: {len(series)} days, {series[0][0]} to {series[-1][0]}, last close {series[-1][1]}")

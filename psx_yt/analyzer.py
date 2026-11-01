@@ -6,17 +6,35 @@ from dataclasses import dataclass
 from .tickers import SECTOR_ALIASES, Stock
 
 # Bullish / bearish cue words in English, Roman Urdu and Urdu script.
+# Tone: words that make talk about a stock positive or negative. "Dividend", "targets" (as in "deposit targets") and
+# "break down" (as in "we break down the results") describe rather than judge, so they aren't here.
 BULLISH = [
-    r"buy(?:ing)?", r"bullish", r"break\s?out", r"targets?", r"upside", r"accumulat\w*", r"rall(?:y|ies)",
-    r"up\s?trend", r"undervalued", r"dividends?", r"payout", r"rebound\w*", r"multi\s?bagger", r"top picks?",
+    r"buy(?:ing)?", r"bullish", r"break\s?out", r"upside", r"accumulat\w*", r"rall(?:y|ies)",
+    r"up\s?trend", r"undervalued", r"rebound\w*", r"multi\s?bagger", r"top picks?",
     r"strong results", r"record profits?", r"outperform\w*", r"all[\s-]time high", r"new high", r"momentum", r"turn\s?around",
     r"khareed\w*", r"kharid\w*", r"tezi", r"taizi", r"munafa", r"خرید\w*", r"تیزی", r"منافع",
 ]
 BEARISH = [
-    r"sell(?:ing)?", r"bearish", r"break\s?down", r"downside", r"crash\w*", r"dump\w*", r"down\s?trend",
-    r"overvalued", r"loss(?:es)?", r"avoid", r"exit", r"underperform\w*", r"red zone",
+    r"sell(?:ing)?", r"bearish", r"break(?:s|ing)?\s+below", r"breakdown\s+below", r"downside", r"crash\w*", r"dump\w*",
+    r"down\s?trend", r"overvalued", r"(?<!stop )(?<!stop-)loss(?:es)?", r"avoid", r"exit", r"underperform\w*", r"red zone",
     r"girawat", r"mandi", r"mandee", r"nuqsan", r"nuksan", r"bech do", r"becho", r"مندی", r"گراوٹ", r"نقصان",
 ]
+# Calls: explicit recommendations only, for the YouTube call column and the channel track record.
+BUY_CALL = [
+    r"buy(?:ing)?", r"accumulat(?:e|ing)", r"top picks?", r"multi\s?bagger(?!s|\s+stocks)", r"khareed\w*", r"kharid\w*", r"خرید\w*",
+    r"price\s+targets?", r"targets?\s*(?:price\s*)?(?:of|at|is|:|-)?\s*(?:rs\.?|pkr)?\s*\d+(?:\.\d+)?",
+]
+SELL_CALL = [r"sell(?:ing)?", r"avoid", r"exit", r"book (?:your )?profits?", r"bech do", r"becho"]
+# Money flows describe what investors did, not advice: "foreign buying", "selling pressure", "selling from banks".
+FLOWS = (r"(?:foreign|institutional|local|retail|heavy|smart\s+money|fipi|lipi|mutual\s+funds?|investors?|banks?|"
+         r"traders?|individuals?|people|public|crowd)\s+(?:are\s+|were\s+)?(?:buying|selling)|"
+         r"(?:buying|selling)\s+(?:pressure|interest|spree|from|by|side|seen|was|in)")
+# Generic how-to and advice phrases that use call words without recommending a stock.
+NOT_CALLS = (r"how\s+to\s+(?:buy|sell)|planning\s+to\s+buy|buy\s+(?:order|button)|before\s+(?:buying|you\s+buy)|"
+             r"(?:everyone|people|they)\s+says?\s+(?:buy|sell)|(?:can|could)\s+(?:actually\s+)?buy|"
+             r"buy\s+(?:their|there)\s+shares|(?:they|it|which|who)\s+(?:do\s+|does\s+)?sells?|"
+             r"avoid\s+(?:fomo|common|these|emotional|panic|mistakes?|traps?|losses|the\s+(?:crowd|mistakes?|traps?))|"
+             r"how\s+to\s+\w+(?:\s+\w+)?\s+multi\s?bagger|became\s+an?\s+(?:[\w-]+\s+)?multi\s?bagger")
 # Explicit "hold" calls. Buy or sell in the same clause wins ("buy and hold" is a buy).
 # Bare "holding" is left out: it is usually a noun ("holdings", "holding company", "property holding").
 HOLD = [r"hold(?!\s+(?:steady|firm|support|levels?|the line|ground))(?:\s+(?:on|kar\w*|rakh\w*))?", r"holding on",
@@ -26,9 +44,15 @@ NEGATORS = {"not", "don't", "dont", "never", "no", "mat", "na", "nahi", "nahin"}
 _BULL_RE = re.compile(r"(?<!\w)(?:" + "|".join(BULLISH) + r")(?!\w)", re.IGNORECASE)
 _BEAR_RE = re.compile(r"(?<!\w)(?:" + "|".join(BEARISH) + r")(?!\w)", re.IGNORECASE)
 _HOLD_RE = re.compile(r"(?<!\w)(?:" + "|".join(HOLD) + r")(?!\w)", re.IGNORECASE)
-# "Buy, sell or hold?" / "BUY SELL HOLD" lists the options rather than making a call ("buy and hold" is still a buy).
-_CALL_WORD = r"(?:buy|sell|hold)"
-_OPTIONS_RE = re.compile(rf"(?<!\w){_CALL_WORD}(?:[\s,/|]+(?:or\s+)?{_CALL_WORD}(?!\w))+", re.IGNORECASE)
+_BUY_CALL_RE = re.compile(r"(?<!\w)(?:" + "|".join(BUY_CALL) + r")(?!\w)", re.IGNORECASE)
+_SELL_CALL_RE = re.compile(r"(?<!\w)(?:" + "|".join(SELL_CALL) + r")(?!\w)", re.IGNORECASE)
+_NOT_CALL_RE = re.compile(r"(?<!\w)(?:" + FLOWS + "|" + NOT_CALLS + r")(?!\w)", re.IGNORECASE)
+# "Buy, sell or hold?", "BUY & SELL & HOLD", "buying and selling" name the options rather than make a call ("buy and
+# hold" is still a buy).
+_CALL_WORD = r"(?:buy|sell|hold|exit|entry)"
+_OPTIONS_RE = re.compile(rf"(?<!\w)(?:{_CALL_WORD}(?:[\s,/|]+(?:or\s+)?{_CALL_WORD}(?!\w))+|"
+                         r"buy(?:ing)?\s*(?:&|and)\s*sell(?:ing)?|sell(?:ing)?\s*(?:&|and)\s*buy(?:ing)?)(?!\w)",
+                         re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"[.!?\n|۔؟]+")
 # Clause breaks inside a sentence: punctuation and contrast words ("buy OGDC, but sell PSO", "OGDC lo lekin PSO becho").
 _CLAUSE_SPLIT = re.compile(
@@ -42,8 +66,9 @@ class Mention:
     symbol: str
     start: int
     end: int
-    sentiment: int  # +1 bullish, -1 bearish, 0 neutral
-    hold: int = 0  # 1 when a neutral mention comes with an explicit hold call
+    sentiment: int  # tone: +1 bullish, -1 bearish, 0 neutral
+    hold: int = 0  # 1 for an explicit hold call (and no buy/sell call)
+    call: int = 0  # explicit recommendation: +1 buy, -1 sell, 0 none
 
 
 def _alias_pattern(alias: str) -> str:
@@ -104,10 +129,10 @@ class Analyzer:
         return [Mention(sym, s, e, *_tone(scored, s, e)) for s, e, sym in taken]
 
 
-def _score(fragment: str) -> tuple[int, int]:
-    """(buy minus sell cues, hold cues) in a fragment; a negated cue counts the other way ("don't hold" is a sell)."""
+def _score(fragment: str, up=_BULL_RE, down=_BEAR_RE, hold=None) -> tuple[int, int]:
+    """(up minus down cues, hold cues) in a fragment; a negated cue counts the other way ("don't hold" is a sell)."""
     score = holds = 0
-    for rx, sign in ((_BULL_RE, 1), (_BEAR_RE, -1), (_HOLD_RE, 0)):
+    for rx, sign in ((up, 1), (down, -1), *(((hold, 0),) if hold else ())):
         for m in rx.finditer(fragment):
             before = fragment[: m.start()].lower().split()[-2:]
             negated = any(w.strip(",;:") in NEGATORS for w in before)
@@ -126,22 +151,35 @@ def _span(split_re: re.Pattern, text: str, start: int, end: int, lo: int = 0, hi
     return left, right_match.start() if right_match else hi
 
 
-def _tone(text: str, start: int, end: int) -> tuple[int, int]:
-    """(tone, hold) around text[start:end]: tone +1, -1 or 0; hold 1 for an explicit hold call with no buy/sell.
+def _tone(text: str, start: int, end: int) -> tuple[int, int, int]:
+    """(tone, hold, call) around text[start:end]: tone +1/-1/0 from tone words; call +1 buy / -1 sell / 0 from explicit
+    recommendations; hold 1 for an explicit hold call with no buy/sell call.
 
-    The clause holding the mention decides ("Buy OGDC, sell PSO" is bullish OGDC, bearish PSO); when that clause has
-    no cue words the whole sentence is used ("OGDC, PPL and PSO: buy all three").
+    The clause holding the mention decides ("Buy OGDC, sell PSO" is buy OGDC, sell PSO); when that clause has no cue
+    words the whole sentence is used ("OGDC, PPL and PSO: buy all three"). A question ("Is OGDC still undervalued?")
+    makes neither a tone nor a call, and nor does a list of options ("Buy, sell or hold?").
     """
     s_left, s_right = _span(_SENTENCE_SPLIT, text, start, end)
+    if s_right < len(text) and text[s_right] in "?؟":
+        return 0, 0, 0
     c_left, c_right = _span(_CLAUSE_SPLIT, text, start, end, s_left, s_right)
-    for left, right in ((c_left, c_right), (s_left, s_right)):
-        if _OPTIONS_RE.search(text, left, right):
-            return 0, 0  # "Buy, sell or hold?" asks the question rather than answering it
-        score, holds = _score(text[left:right])
-        if score or holds:
-            break
-    tone = (score > 0) - (score < 0)
-    return tone, int(tone == 0 and holds > 0)
+
+    def pick(up, down, hold=None, mask=None):
+        for left, right in ((c_left, c_right), (s_left, s_right)):
+            fragment = text[left:right]
+            if _OPTIONS_RE.search(fragment):
+                return 0, 0
+            if mask:
+                fragment = mask.sub(lambda m: " " * len(m.group()), fragment)
+            score, holds = _score(fragment, up, down, hold)
+            if score or holds:
+                return score, holds
+        return 0, 0
+
+    tone_score, _ = pick(_BULL_RE, _BEAR_RE)
+    call_score, holds = pick(_BUY_CALL_RE, _SELL_CALL_RE, _HOLD_RE, _NOT_CALL_RE)
+    call = (call_score > 0) - (call_score < 0)
+    return (tone_score > 0) - (tone_score < 0), int(call == 0 and holds > 0), call
 
 
 def sentence_sentiment(text: str, start: int, end: int) -> int:
@@ -212,10 +250,12 @@ def _summarize(find, title: str, description: str, transcript: str | None) -> di
     out: dict[str, dict] = {}
     for source, text in (("title", title), ("description", description), ("transcript", transcript)):
         for m in find(text or ""):
-            row = out.setdefault(m.symbol, {"title": 0, "description": 0, "transcript": 0, "sentiment": 0, "holds": 0})
+            row = out.setdefault(m.symbol, {"title": 0, "description": 0, "transcript": 0, "sentiment": 0, "holds": 0,
+                                            "calls": 0})
             row[source] += 1
             row["sentiment"] += m.sentiment
             row["holds"] += m.hold
+            row["calls"] += m.call
     return out
 
 
