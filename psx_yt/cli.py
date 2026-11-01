@@ -95,8 +95,8 @@ CAPTION_GRACE = timedelta(days=2)  # YouTube can take a while to auto-generate c
 MAX_FAILURES_IN_A_ROW = 5  # stop early when YouTube is blocking us rather than hammering it
 
 
-def fetch_transcripts(conn, retry: bool = False):
-    """Download captions for videos that have none stored yet.
+def fetch_transcripts(conn, retry: bool = False, limit: int | None = None):
+    """Download captions for videos that have none stored yet, newest first (at most `limit` of them).
 
     A video is marked caption-less ("") only when YouTube says it has none and it is older than CAPTION_GRACE;
     blocks and errors leave it NULL so the next run tries again.
@@ -104,7 +104,10 @@ def fetch_transcripts(conn, retry: bool = False):
     if retry:
         print(f"Retrying captions for {db.reset_empty_transcripts(conn)} videos previously marked as having none")
     rows = db.videos_without_transcript(conn)
-    print(f"Fetching captions for {len(rows)} videos")
+    waiting = len(rows)
+    rows = rows[:limit] if limit else rows
+    print(f"Fetching captions for {len(rows)} of {waiting} videos waiting" if len(rows) < waiting
+          else f"Fetching captions for {len(rows)} videos")
     now = datetime.now(timezone.utc)
     counts = {"ok": 0, "none": 0, "blocked": 0, "error": 0}
     in_a_row = 0

@@ -4,7 +4,8 @@ YouTube blocks caption requests from GitHub's servers, so the daily workflow can
 normal internet connection now and then; the next workflow run picks the captions up from the data branch.
 
     pip install -r requirements.txt
-    python scripts/local_captions.py            # captions for videos still waiting for them, then push
+    python scripts/local_captions.py            # captions for up to 300 videos still waiting, newest first, then push
+    python scripts/local_captions.py --limit 0  # all waiting videos in one go (YouTube may block a long run)
     python scripts/local_captions.py --retry    # also retry videos marked as having no captions
     python scripts/local_captions.py --no-push  # fetch and analyze, but leave the data branch alone
 
@@ -41,6 +42,9 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--remote", default="origin")
     p.add_argument("--retry", action="store_true", help="also retry videos marked as having no captions")
+    p.add_argument("--limit", type=int, default=300,
+                   help="videos per run, newest first (default 300, about 5-10 minutes; 0 = all). Run again for more: "
+                        "YouTube tends to block home connections that ask for hundreds of captions in a row")
     p.add_argument("--no-push", action="store_true", help="don't update the data branch")
     p.add_argument("--keep", help="also copy the updated files to this folder")
     args = p.parse_args(argv)
@@ -56,7 +60,7 @@ def main(argv=None):
 
         conn = db.connect(str(dbfile))
         try:
-            cli.fetch_transcripts(conn, retry=args.retry)
+            cli.fetch_transcripts(conn, retry=args.retry, limit=args.limit or None)
             got = conn.execute("SELECT COUNT(*) FROM videos WHERE length(transcript) > 0").fetchone()[0]
         finally:
             conn.close()

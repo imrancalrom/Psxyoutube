@@ -59,17 +59,53 @@ take a while). Blocked or failed requests are left for the next run, and fetchin
 #### Captions from your own computer
 
 YouTube blocks caption requests from GitHub's servers (`RequestBlocked`), so the daily workflow can't read them.
-From a normal internet connection, run
+Captions matter: most buy/hold/sell calls are spoken, not written in titles. Fetch them from a laptop or PC on a
+normal internet connection (not a phone):
+
+**One-time setup**
+
+1. Install **Python 3.10+** ([python.org/downloads](https://www.python.org/downloads/); on Windows tick
+   "Add python.exe to PATH") and **Git** ([git-scm.com/downloads](https://git-scm.com/downloads)).
+2. Sign Git in to GitHub so it can push. The easiest way is **GitHub Desktop**
+   ([desktop.github.com](https://desktop.github.com)): sign in, then *File → Clone repository →
+   imrancalrom/Psxyoutube*. Or from a terminal: `git clone https://github.com/imrancalrom/Psxyoutube.git`
+   (Git asks you to sign in on the first push).
+3. In a terminal opened in the `Psxyoutube` folder (GitHub Desktop: *Repository → Open in Command Prompt/Terminal*):
+
+   ```bash
+   pip install -r requirements.txt
+   git config user.name "Your Name"            # once, if Git asks who you are
+   git config user.email "you@example.com"
+   ```
+
+**Each time** (Windows: use `py` instead of `python` if `python` isn't found)
 
 ```bash
-python scripts/local_captions.py          # add --retry to retry videos marked as having no captions
+git pull
+python scripts/local_captions.py
 ```
 
-It downloads the database from the `data` branch, fetches captions for every video still waiting for them,
-re-runs the analysis and pushes the result back to `data` as one fresh commit; the next workflow run carries on
-from there. Your working tree and current branch are left alone. If a workflow run updated `data` while the script
-was working, the push is refused instead of overwriting it (and the workflow likewise won't overwrite a push made
-during its run); just run the script again. `--no-push --keep out/` saves the files locally without pushing.
+Each run fetches captions for up to **300 videos, newest first** (about 5–10 minutes), re-runs the analysis and
+pushes the result to the `data` branch; the dashboard shows it after the next workflow run (21:17 PKT, or start one
+from the Actions tab). Run it again for the next 300: the first catch-up of ~2,000 videos takes about seven runs,
+spread over a day or two; after that a run every week or so keeps up. Look for this at the end:
+
+```
+Captions: 280 ok, 15 none, 5 blocked, 0 error
+...
+Done. The next workflow run will start from this data.
+```
+
+- **"blocked" / "stopping, the rest will be tried next run"**: YouTube is limiting your connection. Wait a few
+  hours (or try another network) and run again; nothing is lost.
+- **"The data branch changed while this ran"**: a workflow run finished meanwhile. Just run it again (avoid
+  21:00–21:30 PKT, when the daily run happens).
+- **"none"** means the video has no captions; those aren't asked for again (`--retry` asks again).
+
+Options: `--limit 0` fetches every waiting video in one go (YouTube may block a long run), `--retry` retries videos
+marked as having no captions, and `--no-push --keep out/` saves the files locally without pushing. Your files and
+current branch are never changed, and the push never overwrites newer data (nor does the workflow overwrite a push
+made during its run).
 
 ## Commands
 

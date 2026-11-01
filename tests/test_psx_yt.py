@@ -323,6 +323,17 @@ class CaptionTests(unittest.TestCase):
             cli.fetch_transcripts(conn, retry=True)
         self.assertEqual(conn.execute("SELECT transcript FROM videos WHERE id = 'old_empty'").fetchone()[0], "HUBC")
 
+    def test_fetch_transcripts_limit_takes_newest_first(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        for i in range(5):
+            db.upsert_video(conn, {"id": f"v{i}", "channel_id": "UC1", "title": "t", "published_at": f"2026-01-0{i + 1}T00:00:00Z"})
+        calls = mock.Mock(return_value=("text", "ok", ""))
+        with mock.patch.object(youtube, "fetch_transcript", calls), contextlib.redirect_stdout(io.StringIO()) as out:
+            cli.fetch_transcripts(conn, limit=2)
+        self.assertEqual([c.args[0] for c in calls.call_args_list], ["v4", "v3"])
+        self.assertIn("Fetching captions for 2 of 5 videos waiting", out.getvalue())
+
     def test_fetch_transcripts_stops_when_blocked(self):
         conn = db.connect(":memory:")
         db.upsert_channel(conn, "UC1", "Chan 1")
