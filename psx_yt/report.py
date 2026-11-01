@@ -88,6 +88,9 @@ tr.row:hover { background: var(--bg); }
 .digest li { margin: 2px 0; }
 .dwrap { position: sticky; left: 8px; width: var(--wrapw, auto); max-width: var(--wrapw, none); }
 .tv { margin: 4px 0 12px; }
+.chip { display: inline-block; font-size: 11px; line-height: 1.5; padding: 0 7px; margin-left: 2px; border-radius: 99px;
+  border: 1px solid var(--border); color: var(--text); background: var(--bg); white-space: nowrap; }
+.sigs { margin: 0 0 6px; padding-left: 18px; font-size: 13px; }
 .tvlinks { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; }
 .tvhead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
 .tv > .name { margin-top: 4px; }
@@ -141,6 +144,9 @@ tr.row.note:hover { background: none; }
         <option value="">All calls</option><option value="any">Any call</option>
         <option value="BUY">BUY</option><option value="HOLD">HOLD</option><option value="SELL">SELL</option>
         <option value="MIXED">MIXED</option>
+      </select>
+      <select id="fsig" aria-label="Technical signal">
+        <option value="">All signals</option><option value="any">Any signal</option><option value="near_support">Near support</option><option value="near_resistance">Near resistance</option><option value="range">Tight range</option><option value="oversold">RSI oversold</option><option value="overbought">RSI overbought</option><option value="golden_cross">Golden cross</option><option value="death_cross">Death cross</option><option value="high52">52-week high</option><option value="low52">52-week low</option>
       </select>
       <select id="fmin" aria-label="Minimum videos">
         <option value="1">1+ videos</option><option value="2">2+ videos</option><option value="3">3+ videos</option>
@@ -317,7 +323,7 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
     });
     el.querySelector("tbody").innerHTML = shown.map(s =>
       `<tr class="row${note ? " has-note" : ""}" data-s="${esc(s[key])}">${cells(s)}</tr>` +
-      (note ? `<tr class="row note" data-s="${esc(s[key])}"><td colspan="${cols}">${esc(note(s))}</td></tr>` : "") +
+      (note ? `<tr class="row note" data-s="${esc(s[key])}"><td colspan="${cols}">${note(s)}</td></tr>` : "") +
       (open.has(s[key]) ? `<tr class="detail" data-s="${esc(s[key])}"><td colspan="${cols}"><div class="dwrap">${extra ? extra(s) : ""}${videoList(s, showAll.has(s[key]))}</div></td></tr>` : "")
     ).join("") || `<tr><td colspan="${cols}">${empty}</td></tr>`;
     onRender(shown.length, all.length);
@@ -351,7 +357,9 @@ function tradingView(s) {
     <div class="name">TradingView's embeddable chart doesn't carry PSX stocks (it shows a different company instead), so the
       chart opens on TradingView's own site, which has PSX:${esc(s.symbol)} with all its indicators: add Pivot Points
       Standard for support/resistance, Moving Average (50, 200), RSI and MACD from its Indicators menu.</div></div>`;
-  return `<div class="tv">${head}<div class="tsum">${esc(t.summary)}</div>
+  const sigs = (t.signals || []).length
+    ? `<ul class="sigs">${t.signals.map(g => `<li><strong>${esc(g.label)}</strong>: ${esc(g.detail)}</li>`).join("")}</ul>` : "";
+  return `<div class="tv">${head}<div class="tsum">${esc(t.summary)}</div>${sigs}
     <div class="pchart" data-symbol="${esc(s.symbol)}"></div>
     <div class="name">Daily closes for the last ${t.chart.dates.length} trading days with SMA 50 and SMA 200; dashed lines are support
       (green) and resistance (red) from swing highs/lows over the past year, with how many times price touched them; lower
@@ -420,26 +428,31 @@ function loadCharts(root) {
 }
 
 const q = document.getElementById("q"), fsec = document.getElementById("fsec");
-const fcall = document.getElementById("fcall"), fmin = document.getElementById("fmin");
+const fcall = document.getElementById("fcall"), fmin = document.getElementById("fmin"), fsig = document.getElementById("fsig");
+// Technical signals from daily closes (support/resistance, RSI, crosses, 52-week range).
+const signalsOf = sym => (ALL.tech[sym] && ALL.tech[sym].signals) || [];
+const signalChips = sym => signalsOf(sym).map(g => ` <span class="chip" title="${esc(g.detail)}">${esc(g.label)}</span>`).join("");
 function stockFilter(s) {
   const text = q.value.toLowerCase();
   if (text && !(s.symbol + " " + s.name + " " + s.sector).toLowerCase().includes(text)) return false;
   if (fsec.value && s.sector !== fsec.value) return false;
   if (fcall.value === "any" ? s.call === "-" : fcall.value && s.call !== fcall.value) return false;
+  const kinds = signalsOf(s.symbol).map(g => g.kind);
+  if (fsig.value === "any" ? !kinds.length : fsig.value && !kinds.includes(fsig.value)) return false;
   return s.videos >= Number(fmin.value);
 }
 const renderStocks = table({
   id: "tbl", rows: () => DATA.stocks, key: "symbol", empty: "No stocks match these filters in this period.",
-  filter: stockFilter, note: s => s.summary, extra: tradingView,
+  filter: stockFilter, note: s => esc(s.summary) + signalChips(s.symbol), extra: tradingView,
   onRender: (shown, all) => { document.getElementById("count").textContent = `Showing ${shown} of ${all} stocks`; },
   cells: s => `<td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
     <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
     <td class="num">${s.channel_count}</td><td class="num">${s.recent} <span class="name">(${s.previous})</span></td>
     <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${sbar(s)}</td><td>${tone(s)}</td><td>${callCell(s)}</td><td class="num">${fmt(s.views)}</td>`,
 });
-[q, fsec, fcall, fmin].forEach(el => el.addEventListener("input", renderStocks));
+[q, fsec, fcall, fsig, fmin].forEach(el => el.addEventListener("input", renderStocks));
 document.getElementById("freset").addEventListener("click", () => {
-  q.value = ""; fsec.value = ""; fcall.value = ""; fmin.value = "1"; renderStocks();
+  q.value = ""; fsec.value = ""; fcall.value = ""; fsig.value = ""; fmin.value = "1"; renderStocks();
 });
 const renderSectors = table({
   id: "sectbl", rows: () => DATA.sectors, key: "sector", empty: "No sectors discussed in this period.",
