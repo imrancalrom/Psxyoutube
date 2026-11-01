@@ -49,6 +49,32 @@ def fetch_eod(symbol: str) -> list[tuple[str, float, int | None]]:
     return parse_eod(payload)
 
 
+def probe(symbol: str) -> None:
+    """Print what the portal's likely price endpoints return for one symbol (to find the right one; run on a machine
+    that can reach dps.psx.com.pk)."""
+    ajax = {**HEADERS, "X-Requested-With": "XMLHttpRequest", "Referer": f"https://dps.psx.com.pk/company/{symbol}"}
+    tries = [
+        ("GET", f"https://dps.psx.com.pk/timeseries/eod/{symbol}", HEADERS, None),
+        ("GET", f"https://dps.psx.com.pk/timeseries/eod/{symbol}", ajax, None),
+        ("GET", f"https://dps.psx.com.pk/timeseries/int/{symbol}", ajax, None),
+        ("GET", f"https://dps.psx.com.pk/company/{symbol}", HEADERS, None),
+        ("POST", "https://dps.psx.com.pk/historical", ajax, {"symbol": symbol}),
+        ("GET", "https://dps.psx.com.pk/historical", HEADERS, None),
+    ]
+    for method, url, headers, form in tries:
+        try:
+            r = requests.request(method, url, headers=headers, data=form, timeout=30)
+            body = " ".join(r.text[:300].split())
+            print(f"{method} {url} {'(ajax headers)' if headers is ajax else ''}{' form=' + str(form) if form else ''}\n"
+                  f"   -> HTTP {r.status_code}, {r.headers.get('content-type', '?')}, {len(r.content)} bytes: {body}")
+            if r.headers.get("content-type", "").startswith("text/html"):
+                forms = [" ".join(f.split())[:300] for f in __import__("re").findall(r"<form.*?</form>", r.text, flags=16)]
+                for f in forms[:3]:
+                    print(f"   form: {f}")
+        except requests.RequestException as e:
+            print(f"{method} {url} -> {type(e).__name__}: {e}")
+
+
 # --- indicators -------------------------------------------------------------------------------------------------
 
 def sma(values: list[float], n: int) -> list[float | None]:

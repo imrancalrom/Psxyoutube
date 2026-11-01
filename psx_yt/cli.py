@@ -249,6 +249,9 @@ def cmd_export(args, conn):
 def cmd_prices(args, conn):
     """Daily closes from the PSX data portal for every stock mentioned in the look-back period (for the dashboard's
     price charts). Failures only skip that stock; after 5 in a row the portal is assumed unreachable."""
+    if args.probe:
+        prices.probe(args.probe)
+        return
     since = (datetime.now(timezone.utc).date() - timedelta(days=args.days)).isoformat()
     symbols = [r[0] for r in conn.execute(
         """SELECT DISTINCT m.symbol FROM mentions m JOIN videos v ON v.id = m.video_id
@@ -387,6 +390,7 @@ def main(argv=None):
     s.set_defaults(func=cmd_export)
     s = sub.add_parser("prices", help="Download daily prices from the PSX data portal for the dashboard's charts")
     s.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Stocks mentioned in this many days")
+    s.add_argument("--probe", metavar="SYMBOL", help="Only print what the portal's price endpoints return for SYMBOL")
     s.set_defaults(func=cmd_prices)
     s = sub.add_parser("run", help="fetch + analyze + prices + top + report")
     fetch_opts(s)
