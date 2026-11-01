@@ -253,7 +253,8 @@ def cmd_prices(args, conn):
     """Daily closes from the PSX data portal for every stock mentioned in the look-back period (for the dashboard's
     price charts). Failures only skip that stock; after 5 in a row the portal is assumed unreachable."""
     if args.probe:
-        prices.probe(args.probe)
+        print("== PSX data portal"); prices.probe(args.probe)
+        print("== Yahoo Finance"); prices.probe_yahoo(args.probe)
         return
     since = (datetime.now(timezone.utc).date() - timedelta(days=args.days)).isoformat()
     symbols = [r[0] for r in conn.execute(

@@ -75,6 +75,42 @@ def probe(symbol: str) -> None:
             print(f"{method} {url} -> {type(e).__name__}: {e}")
 
 
+YAHOO_URL = "https://query{n}.finance.yahoo.com/v8/finance/chart/{symbol}.KA"
+
+
+def probe_yahoo(symbol: str) -> None:
+    """Print what Yahoo Finance returns for SYMBOL.KA, including what it says the series is (symbol, exchange,
+    currency, name), so a wrong match can be spotted before any of it is used."""
+    for n in (1, 2):
+        url = YAHOO_URL.format(n=n, symbol=symbol)
+        try:
+            r = requests.get(url, params={"range": "2y", "interval": "1d"}, headers=HEADERS, timeout=30)
+        except requests.RequestException as e:
+            print(f"GET {url} -> {type(e).__name__}: {e}")
+            continue
+        print(f"GET {url}?range=2y&interval=1d\n   -> HTTP {r.status_code}, {r.headers.get('content-type', '?')}, {len(r.content)} bytes")
+        try:
+            chart = r.json().get("chart", {})
+        except ValueError:
+            print(f"   not JSON: {' '.join(r.text[:200].split())}")
+            continue
+        if chart.get("error"):
+            print(f"   error: {chart['error']}")
+        for res in chart.get("result") or []:
+            meta = res.get("meta", {})
+            print("   meta: " + ", ".join(f"{k}={meta.get(k)!r}" for k in
+                                         ("symbol", "exchangeName", "fullExchangeName", "currency", "longName",
+                                          "shortName", "instrumentType", "regularMarketPrice", "dataGranularity")))
+            ts = res.get("timestamp") or []
+            quote = (res.get("indicators", {}).get("quote") or [{}])[0]
+            closes = quote.get("close") or []
+            points = [(t, c) for t, c in zip(ts, closes) if c is not None]
+            print(f"   {len(ts)} timestamps, {len(points)} closes; fields: {sorted(quote)}")
+            for t, c in points[:2] + points[-3:]:
+                print(f"     {datetime.fromtimestamp(t, timezone.utc).date()} close {c}")
+        break
+
+
 # --- indicators -------------------------------------------------------------------------------------------------
 
 def sma(values: list[float], n: int) -> list[float | None]:

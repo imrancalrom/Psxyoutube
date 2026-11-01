@@ -23,7 +23,7 @@ on:
         type: boolean
         default: false
       probe_prices:
-        description: Only print what the PSX portal's price endpoints return for OGDC (diagnostic; no data saved)
+        description: Only print what the price sources (PSX portal, Yahoo Finance) return for OGDC and ATRL (diagnostic; no data saved)
         type: boolean
         default: false
 
@@ -54,6 +54,7 @@ jobs:
         if: ${{ inputs.probe_prices }}
         run: |
           python -m psx_yt --db probe.db prices --probe OGDC
+          python -m psx_yt --db probe.db prices --probe ATRL
 
       - name: Restore database from the data branch
         if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
