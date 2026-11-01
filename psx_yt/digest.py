@@ -6,6 +6,7 @@ Everything is read from the stored data, so it needs no snapshot of the previous
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+from . import prices
 from .tickers import Stock
 from .trends import compute
 
@@ -96,6 +97,24 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
         if bits:
             sectors.append(f"{s['sector']}: {', '.join(bits)}")
 
+    # Technical signals from daily closes, for the discussed stocks; within a signal, stocks whose buzz is rising come
+    # first, then the most discussed.
+    by_kind = defaultdict(list)
+    for st in data["stocks"]:
+        series = conn.execute("SELECT date, close, volume FROM prices WHERE symbol = ? ORDER BY date",
+                              (st["symbol"],)).fetchall()
+        t = prices.technicals([tuple(r) for r in series])
+        hot = st["trend"] in ("RISING", "NEW") and st["recent"] >= 2
+        for sg in (t or {}).get("signals", []):
+            by_kind[sg["kind"]].append((not hot, -st["buzz"], st["symbol"], sg["detail"], hot))
+    technical = []
+    for kind in ("oversold", "overbought", "near_support", "near_resistance", "range",
+                 "golden_cross", "death_cross", "high52", "low52"):
+        picked = sorted(by_kind.get(kind, []))[:TOP]
+        if picked:
+            technical.append(f"{prices.SIGNAL_LABELS[kind]}: " + "; ".join(
+                f"{sym} {detail}{' · buzz rising' if hot else ''}" for _, _, sym, detail, hot in picked))
+
     most = data["stocks"][0]["symbol"] if data["stocks"] else None
     week_videos = sum(1 for _ in conn.execute(
         "SELECT 1 FROM videos WHERE substr(published_at, 1, 10) >= ?", (start,)))
@@ -103,7 +122,8 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
                 + (f"; most discussed over 90 days: {most} ({names[most]['videos']} videos)" if most else ""))
     sections = [{"title": "Last 24 hours", "items": last24},
                 {"title": "This week vs last week", "items": week or ["No changes worth noting"]},
-                {"title": "Sectors", "items": sectors[:TOP]}]
+                {"title": "Sectors", "items": sectors[:TOP]},
+                {"title": "Technical signals (daily closes)", "items": technical}]
     return {"title": f"PSX YouTube digest, {today.strftime('%d %b %Y')}", "date": today.isoformat(),
             "headline": headline, "sections": [s for s in sections if s["items"]]}
 
@@ -112,5 +132,6 @@ def markdown(d: dict) -> str:
     lines = [f"## {d['title']}", "", d["headline"], ""]
     for s in d["sections"]:
         lines += [f"**{s['title']}**", ""] + [f"- {item}" for item in s["items"]] + [""]
-    lines.append("_What the tracked channels said, detected from keywords. Not investment advice._")
+    lines.append("_What the tracked channels said, detected from keywords; technical signals are mechanical calculations "
+                 "from Yahoo Finance daily closes. Not investment advice._")
     return "\n".join(lines) + "\n"

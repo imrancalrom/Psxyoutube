@@ -297,6 +297,17 @@ class PriceTests(unittest.TestCase):
         self.assertIn("Prices: 1 of 2 stocks", out.getvalue())
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM prices WHERE symbol = 'OGDC'").fetchone()[0], 40)
 
+    def test_signals(self):
+        base = {"close": 100.0, "rsi14": 50.0, "cross": None, "high52": 120.0, "low52": 80.0,
+                "support": [{"price": 99.0, "touches": 3}], "resistance": [{"price": 110.0, "touches": 2}]}
+        kinds = lambda t: [s["kind"] for s in prices.signals(t)]
+        self.assertEqual(kinds(base), ["near_support"])
+        self.assertEqual(kinds({**base, "support": [{"price": 99.0, "touches": 1}]}), [])           # weak level
+        self.assertEqual(kinds({**base, "resistance": [{"price": 101.0, "touches": 2}]}), ["range"])  # near both
+        self.assertEqual(kinds({**base, "support": [], "rsi14": 25.0, "low52": 100.0}), ["oversold", "low52"])
+        self.assertEqual(kinds({**base, "support": [], "cross": {"kind": "golden", "date": "2026-10-28"}}), ["golden_cross"])
+        self.assertEqual(prices.signals(base)[0]["detail"], "99 support (3×), 1.0% above")
+
     def test_moving_averages_and_rsi(self):
         self.assertEqual(prices.sma([1, 2, 3, 4, 5], 3), [None, None, 2.0, 3.0, 4.0])
         rising = [float(v) for v in range(1, 40)]

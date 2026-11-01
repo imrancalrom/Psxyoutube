@@ -264,7 +264,45 @@ def technicals(series: list[tuple[str, float, int | None]], chart_days: int = 18
         "chart": {"dates": dates[k], "close": closes[k], "sma50": s50[k], "sma200": s200[k], "rsi14": r14[k]},
     }
     t["summary"] = technical_summary(t)
+    t["signals"] = signals(t)
     return t
+
+
+NEAR = 0.02  # "near" a level: within 2% of it
+MIN_TOUCHES = 2  # a level price has tested only once is weak evidence, so it doesn't make a "near" signal
+
+SIGNAL_LABELS = {
+    "near_support": "Near support", "near_resistance": "Near resistance", "range": "Tight range",
+    "oversold": "RSI oversold", "overbought": "RSI overbought",
+    "golden_cross": "Golden cross", "death_cross": "Death cross",
+    "high52": "52-week high", "low52": "52-week low",
+}
+
+
+def signals(t: dict) -> list[dict]:
+    """Mechanical signals from a technicals() result: [{"kind", "label", "detail"}], most specific first."""
+    out = []
+    close = t["close"]
+    sup = next((l for l in t["support"] if l["touches"] >= MIN_TOUCHES and close <= l["price"] * (1 + NEAR)), None)
+    res = next((l for l in t["resistance"] if l["touches"] >= MIN_TOUCHES and close >= l["price"] * (1 - NEAR)), None)
+    if sup and res:  # close to both: squeezed between them
+        out.append(("range", f"{sup['price']:g}–{res['price']:g}, {100 * (res['price'] / sup['price'] - 1):.1f}% wide"))
+    elif sup:
+        out.append(("near_support", f"{sup['price']:g} support ({sup['touches']}×), {100 * (close / sup['price'] - 1):.1f}% above"))
+    elif res:
+        out.append(("near_resistance", f"{res['price']:g} resistance ({res['touches']}×), {100 * (res['price'] / close - 1):.1f}% below"))
+    if t["rsi14"] is not None and t["rsi14"] <= 30:
+        out.append(("oversold", f"RSI {t['rsi14']:.0f}"))
+    if t["rsi14"] is not None and t["rsi14"] >= 70:
+        out.append(("overbought", f"RSI {t['rsi14']:.0f}"))
+    if t["cross"]:
+        out.append((f"{t['cross']['kind']}_cross", f"SMA 50 {'above' if t['cross']['kind'] == 'golden' else 'below'} "
+                                                    f"SMA 200 since {t['cross']['date']}"))
+    if close >= t["high52"]:
+        out.append(("high52", f"at {close:g}"))
+    elif close <= t["low52"]:
+        out.append(("low52", f"at {close:g}"))
+    return [{"kind": k, "label": SIGNAL_LABELS[k], "detail": d} for k, d in out]
 
 
 def technical_summary(t: dict) -> str:

@@ -159,7 +159,8 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
      "Selling from Banks" and "Buy MEBL" both count for Banks. `Named` is how many videos named the sector itself.
 4. **Daily digest**: each run also writes a short "what changed" note (`digest.md` on the `data` branch, the top of
    the GitHub run page, and a box at the top of the dashboard): the last 24 hours' videos, stocks and calls; stocks
-   newly discussed this week; buzz rising and fading; this week's buy/hold/sell calls; and sector shifts.
+   newly discussed this week; buzz rising and fading; this week's buy/hold/sell calls; sector shifts; and
+   **technical signals** for the discussed stocks, those whose buzz is rising first.
 5. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
    download or inside app file previews): leaderboard tiles (including tone improving / worsening most), trend chart for the top 5 (daily up to 31 days, weekly for longer periods), buzz by sector,
    a sortable sectors table and a sortable/filterable stocks table; click a row to see the videos behind it.
@@ -176,6 +177,9 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    needs no internet to view. Every stock links to its chart and overview on **TradingView**'s site, which has PSX
    prices and indicators (Pivot Points Standard for support/resistance, moving averages, RSI, MACD). TradingView's
    embeddable chart isn't used: it doesn't carry PSX stocks and silently shows a different company (Apple) instead.
+   **Technical signals** (labels on each stock, a "Signal" filter, and the list above its chart): near support or
+   resistance (within 2% of a level price has touched at least twice), tight range (near both), RSI oversold (≤30) or
+   overbought (≥70), golden/death cross (SMA 50 crossing SMA 200 in the last 20 trading days), and 52-week high/low.
    These are mechanical calculations, not advice.
    Each stock has a one-line summary built from its numbers (also the `summary` column in the CSVs), e.g.
    "23 videos on 8 channels · 3 this week, none the week before · calls split: 3 buy, 3 sell".
