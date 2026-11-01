@@ -8,7 +8,7 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 
-from . import db, youtube
+from . import db, prices, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                        strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
@@ -204,7 +204,13 @@ REPORT_PERIODS = (7, 15, 21, 28, 90)  # look-backs the dashboard can switch betw
 def cmd_report(args, conn):
     stocks = load_tickers(args.tickers)
     periods = {d: compute(conn, stocks, days=d) for d in sorted({*REPORT_PERIODS, args.days})}
-    path = write_report(periods, args.output, default=args.days)
+    tech = {}
+    for sym in {x["symbol"] for p in periods.values() for x in p["stocks"]}:
+        series = conn.execute("SELECT date, close, volume FROM prices WHERE symbol = ? ORDER BY date", (sym,)).fetchall()
+        t = prices.technicals([tuple(r) for r in series])
+        if t:
+            tech[sym] = t
+    path = write_report(periods, args.output, default=args.days, tech=tech)
     data = periods[args.days]
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors "
           f"over {args.days} days; also {', '.join(str(d) for d in periods if d != args.days)}-day views)")
@@ -240,9 +246,40 @@ def cmd_export(args, conn):
     print(f"Exported {what} to {args.output}")
 
 
+def cmd_prices(args, conn):
+    """Daily closes from the PSX data portal for every stock mentioned in the look-back period (for the dashboard's
+    price charts). Failures only skip that stock; after 5 in a row the portal is assumed unreachable."""
+    since = (datetime.now(timezone.utc).date() - timedelta(days=args.days)).isoformat()
+    symbols = [r[0] for r in conn.execute(
+        """SELECT DISTINCT m.symbol FROM mentions m JOIN videos v ON v.id = m.video_id
+           WHERE substr(v.published_at, 1, 10) >= ? ORDER BY m.symbol""", (since,))]
+    print(f"Fetching daily prices for {len(symbols)} stocks from the PSX data portal")
+    ok = failed_in_a_row = 0
+    for sym in symbols:
+        try:
+            series = prices.fetch_eod(sym)
+        except (prices.PriceError, OSError) as e:
+            failed_in_a_row += 1
+            print(f"  ! {sym}: {e}")
+            if failed_in_a_row >= MAX_FAILURES_IN_A_ROW:
+                warn(f"Price downloads failed {failed_in_a_row} times in a row ({e}); skipped the rest. "
+                     "The dashboard shows TradingView links instead of price charts for them.")
+                break
+            continue
+        failed_in_a_row = 0
+        conn.executemany("INSERT OR REPLACE INTO prices VALUES (?, ?, ?, ?)", [(sym, *row) for row in series])
+        ok += 1
+        if ok == 1:
+            print(f"  {sym}: {len(series)} days, {series[0][0]} to {series[-1][0]}, last close {series[-1][1]}")
+    conn.commit()
+    print(f"Prices: {ok} of {len(symbols)} stocks")
+
+
 def cmd_run(args, conn):
     cmd_fetch(args, conn)
     cmd_analyze(args, conn)
+    if not args.no_prices:
+        cmd_prices(args, conn)
     cmd_top(args, conn)
     cmd_report(args, conn)
 
@@ -348,9 +385,13 @@ def main(argv=None):
     s.add_argument("-o", "--output", default="psx_buzz.csv", help="Output file, .csv or .json")
     s.add_argument("--sectors", action="store_true", help="CSV of sectors instead of stocks")
     s.set_defaults(func=cmd_export)
-    s = sub.add_parser("run", help="fetch + analyze + top + report")
+    s = sub.add_parser("prices", help="Download daily prices from the PSX data portal for the dashboard's charts")
+    s.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Stocks mentioned in this many days")
+    s.set_defaults(func=cmd_prices)
+    s = sub.add_parser("run", help="fetch + analyze + prices + top + report")
     fetch_opts(s)
     view_opts(s)
+    s.add_argument("--no-prices", action="store_true", help="Skip downloading prices")
     s.set_defaults(func=cmd_run)
     s = sub.add_parser("demo", help="Try it offline with synthetic data (use a separate --db)")
     s.add_argument("--videos", type=int, default=300)

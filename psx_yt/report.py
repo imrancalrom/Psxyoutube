@@ -81,10 +81,22 @@ tr.row:hover { background: var(--bg); }
 .pos { color: var(--bull); } .neg { color: var(--bear); }
 .foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
 .section { margin-bottom: 16px; }
+.dwrap { position: sticky; left: 8px; width: var(--wrapw, auto); max-width: var(--wrapw, none); }
 .tv { margin: 4px 0 12px; }
 .tvhead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
 .tvchart { height: 360px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
 .tvchart .name { padding: 12px; }
+.tsum { font-size: 13px; margin-bottom: 6px; }
+.pchart svg { display: block; overflow: visible; }
+.pchart svg text { fill: var(--muted); font-size: 11px; }
+.pchart .grid { stroke: var(--border); } .pchart .dash { stroke-dasharray: 3 3; }
+.pchart .ln { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
+.pchart .lvl { stroke-width: 1.2; stroke-dasharray: 6 4; }
+.pchart .lvl.sup { stroke: var(--bull); } .pchart .lvl.res { stroke: var(--bear); }
+.pchart text.sup { fill: var(--bull); } .pchart text.res { fill: var(--bear); }
+.pchart .hit { fill: transparent; } .pchart .hit:hover { fill: var(--border); fill-opacity: 0.35; }
+.legend i.sw { height: 0; border-top: 2px dashed; border-radius: 0; vertical-align: 3px; }
+.legend i.sw.sup { border-color: var(--bull); } .legend i.sw.res { border-color: var(--bear); }
 tr.has-note td { border-bottom: 0; padding-bottom: 2px; }
 tr.note td { padding-top: 0; color: var(--muted); font-size: 12px; white-space: normal; }
 tr.row.note:hover { background: none; }
@@ -290,9 +302,10 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
     el.querySelector("tbody").innerHTML = shown.map(s =>
       `<tr class="row${note ? " has-note" : ""}" data-s="${esc(s[key])}">${cells(s)}</tr>` +
       (note ? `<tr class="row note" data-s="${esc(s[key])}"><td colspan="${cols}">${esc(note(s))}</td></tr>` : "") +
-      (open.has(s[key]) ? `<tr class="detail" data-s="${esc(s[key])}"><td colspan="${cols}">${extra ? extra(s) : ""}${videoList(s, showAll.has(s[key]))}</td></tr>` : "")
+      (open.has(s[key]) ? `<tr class="detail" data-s="${esc(s[key])}"><td colspan="${cols}"><div class="dwrap">${extra ? extra(s) : ""}${videoList(s, showAll.has(s[key]))}</div></td></tr>` : "")
     ).join("") || `<tr><td colspan="${cols}">${empty}</td></tr>`;
     onRender(shown.length, all.length);
+    fitDetails(el);
     loadCharts(el);
   }
   el.querySelector("tbody").addEventListener("click", e => {
@@ -308,20 +321,85 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
   return render;
 }
 
-// TradingView: a link for every stock, and its chart when the stock is opened. The chart needs internet, so offline
-// (or in an app preview) it falls back to the link with a short note instead of an empty box.
+// Price section of an opened stock: our own technical chart when the daily run fetched prices (works offline),
+// otherwise TradingView's chart. The TradingView link is always there.
 const tvPage = sym => `https://www.tradingview.com/symbols/PSX-${encodeURIComponent(sym)}/`;
 function tradingView(s) {
-  return `<div class="tv"><div class="tvhead"><strong>${esc(s.symbol)} price</strong>
-      <a href="${tvPage(s.symbol)}" target="_blank" rel="noopener">Open PSX:${esc(s.symbol)} on TradingView ↗</a></div>
-    <div class="tvchart" data-symbol="PSX:${esc(s.symbol)}"></div></div>`;
+  const t = ALL.tech[s.symbol];
+  const head = `<div class="tvhead"><strong>${esc(s.symbol)} price${t ? ` · last close ${esc(t.date)}` : ""}</strong>
+      <a href="${tvPage(s.symbol)}" target="_blank" rel="noopener">Open PSX:${esc(s.symbol)} on TradingView ↗</a></div>`;
+  if (!t) return `<div class="tv">${head}<div class="tvchart" data-symbol="PSX:${esc(s.symbol)}"></div></div>`;
+  return `<div class="tv">${head}<div class="tsum">${esc(t.summary)}</div>
+    <div class="pchart" data-symbol="${esc(s.symbol)}"></div>
+    <div class="name">Daily closes for the last ${t.chart.dates.length} trading days with SMA 50 and SMA 200; dashed lines are support
+      (green) and resistance (red) from swing highs/lows over the past year, with how many times price touched them; lower
+      panel RSI 14 (30/70 bands). Calculated mechanically from closing prices; not advice.</div></div>`;
+}
+function priceChart(box, t) {
+  const c = t.chart, n = c.close.length;
+  const W = Math.max(300, box.clientWidth), PH = 220, GAP = 16, RH = 70, L = 8, R = 92, T = 8, B = 20;
+  const H = T + PH + GAP + RH + B;
+  const lvls = [...t.support.map(l => ({ ...l, kind: "S" })), ...t.resistance.map(l => ({ ...l, kind: "R" }))];
+  const vals = [...c.close, ...c.sma50, ...c.sma200, ...lvls.map(l => l.price)].filter(v => v !== null);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.04 || hi * 0.02; lo -= pad; hi += pad;
+  const x = i => L + (n < 2 ? 0 : i * (W - L - R) / (n - 1));
+  const y = v => T + PH * (1 - (v - lo) / (hi - lo));
+  const ry = v => T + PH + GAP + RH * (1 - v / 100);
+  const path = (arr, yf) => { let d = "", pen = false;
+    arr.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${yf(v).toFixed(1)}`; pen = true; });
+    return d; };
+  // Level labels sit on the right axis: keep them at least 13px apart, and drop grid labels they would cover.
+  const labelY = [];
+  [...lvls].sort((a, b) => y(a.price) - y(b.price)).forEach(l => {
+    let ly = y(l.price) - 3;
+    if (labelY.length && ly - labelY[labelY.length - 1].y < 13) ly = labelY[labelY.length - 1].y + 13;
+    labelY.push({ l, y: ly });
+  });
+  let svg = "";
+  for (let k = 0; k <= 4; k++) {  // price grid
+    const v = lo + (hi - lo) * k / 4, gy = y(v) + 4;
+    svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>`;
+    if (labelY.every(p => Math.abs(p.y - gy) >= 12)) svg += `<text x="${W - R + 6}" y="${gy}">${v.toFixed(v < 100 ? 2 : 0)}</text>`;
+  }
+  [30, 70].forEach(v => { svg += `<line class="grid dash" x1="${L}" x2="${W - R}" y1="${ry(v)}" y2="${ry(v)}"/><text x="${W - R + 6}" y="${ry(v) + 4}">${v}</text>`; });
+  svg += `<text x="${L}" y="${T + PH + GAP - 3}">RSI 14</text>`;
+  let lastMonth = "";  // month labels along the bottom
+  c.dates.forEach((d, i) => { const m = d.slice(0, 7); if (m !== lastMonth) { if (lastMonth && x(i) < W - R - 20) svg += `<text x="${x(i)}" y="${H - 5}" text-anchor="middle">${new Date(d + "T00:00:00Z").toLocaleString("en", { month: "short", timeZone: "UTC" })}</text>`; lastMonth = m; } });
+  labelY.forEach(({ l, y: ly }) => {
+    const cls = l.kind === "S" ? "sup" : "res";
+    svg += `<line class="lvl ${cls}" x1="${L}" x2="${W - R}" y1="${y(l.price)}" y2="${y(l.price)}"/>` +
+      `<text class="${cls}" x="${W - R + 6}" y="${ly}">${l.kind} ${l.price} (${l.touches}×)</text>`;
+  });
+  svg += `<path d="${path(c.sma200, y)}" class="ln" style="stroke:var(--s4)"/>` +
+         `<path d="${path(c.sma50, y)}" class="ln" style="stroke:var(--s2)"/>` +
+         `<path d="${path(c.close, y)}" class="ln" style="stroke:var(--accent);stroke-width:2"/>` +
+         `<path d="${path(c.rsi14, ry)}" class="ln" style="stroke:var(--s3)"/>`;
+  const half = n < 2 ? 4 : (W - L - R) / (n - 1) / 2;
+  c.dates.forEach((d, i) => {
+    const f = v => v === null ? "–" : v;
+    svg += `<rect class="hit" x="${x(i) - half}" y="${T}" width="${2 * half}" height="${PH + GAP + RH}"><title>${d}: close ${c.close[i]} · SMA 50 ${f(c.sma50[i])} · SMA 200 ${f(c.sma200[i])} · RSI ${f(c.rsi14[i])}</title></rect>`;
+  });
+  box.innerHTML = `<div class="legend"><span><i style="background:var(--accent)"></i>Close</span><span><i style="background:var(--s2)"></i>SMA 50</span>` +
+    `<span><i style="background:var(--s4)"></i>SMA 200</span><span><i style="background:var(--s3)"></i>RSI 14</span>` +
+    `<span><i class="sw sup"></i>Support</span><span><i class="sw res"></i>Resistance</span></div>` +
+    `<svg width="${W}" height="${H}" role="img" aria-label="${esc(t.summary)}">${svg}</svg>`;
 }
 function chartFailed(box, why) {
   box.dataset.loaded = "failed";
   box.style.height = "auto";
   box.innerHTML = `<p class="name">${why} Use the TradingView link above to see the chart.</p>`;
 }
+// A row's detail spans the whole (possibly wider than the screen) table, so pin its content to the visible width.
+function fitDetails(tbl) {
+  tbl.style.setProperty("--wrapw", Math.max(260, tbl.parentElement.clientWidth - 16) + "px");
+}
+window.addEventListener("resize", () => document.querySelectorAll("#tbl, #sectbl").forEach(fitDetails));
 function loadCharts(root) {
+  root.querySelectorAll(".pchart:not([data-drawn])").forEach(box => {
+    box.dataset.drawn = "1";
+    priceChart(box, ALL.tech[box.dataset.symbol]);
+  });
   root.querySelectorAll(".tvchart:not([data-loaded])").forEach(box => {
     box.dataset.loaded = "loading";
     if (!navigator.onLine) return chartFailed(box, "The TradingView chart needs an internet connection.");
@@ -393,8 +471,9 @@ setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
 """
 
 
-def write_report(periods: dict[int, dict], path: str | Path, default: int) -> Path:
-    """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`."""
+def write_report(periods: dict[int, dict], path: str | Path, default: int, tech: dict | None = None) -> Path:
+    """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`.
+    `tech` maps symbols to prices.technicals() output for the price charts."""
     # Each video's details are stored once; stocks and sectors in every period refer to them by id.
     videos: dict[str, list] = {}
 
@@ -407,7 +486,7 @@ def write_report(periods: dict[int, dict], path: str | Path, default: int) -> Pa
 
     data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
                                  "sectors": [compact(x) for x in p["sectors"]]} for d, p in periods.items()},
-            "default": default, "videos": videos}
+            "default": default, "videos": videos, "tech": tech or {}}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     path = Path(path)
     path.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")
