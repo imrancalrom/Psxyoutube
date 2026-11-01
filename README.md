@@ -127,7 +127,8 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    switching is instant; the link remembers it, e.g. `report.html#28`), and the stocks table filters by sector,
    YouTube call and minimum videos. The week-over-week columns always compare the last 7 days with the 7 before.
    Opening a stock shows a **technical chart** drawn from daily closes that the run downloads from the PSX data
-   portal (`prices` command, part of `run`; `--no-prices` skips it): close with SMA 50 / SMA 200, support (green) and
+   portal (`prices` command, or `run --prices`; the portal refuses automated requests from GitHub's servers, so the
+   daily workflow doesn't fetch prices): close with SMA 50 / SMA 200, support (green) and
    resistance (red) levels from swing highs/lows over the past year with how often price touched them, and an RSI 14
    panel with 30/70 bands, plus a one-line summary ("Close 308 (+0.6%) · above SMA 50, below SMA 200 · RSI 62 ·
    support 290 (3×) · resistance 320 (2×)"; MACD 12/26/9, SMA 20 and the 52-week range are in the data too). It

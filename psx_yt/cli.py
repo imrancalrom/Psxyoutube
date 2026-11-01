@@ -281,7 +281,7 @@ def cmd_prices(args, conn):
 def cmd_run(args, conn):
     cmd_fetch(args, conn)
     cmd_analyze(args, conn)
-    if not args.no_prices:
+    if args.prices:
         cmd_prices(args, conn)
     cmd_top(args, conn)
     cmd_report(args, conn)
@@ -392,10 +392,11 @@ def main(argv=None):
     s.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Stocks mentioned in this many days")
     s.add_argument("--probe", metavar="SYMBOL", help="Only print what the portal's price endpoints return for SYMBOL")
     s.set_defaults(func=cmd_prices)
-    s = sub.add_parser("run", help="fetch + analyze + prices + top + report")
+    s = sub.add_parser("run", help="fetch + analyze + top + report (+ prices with --prices)")
     fetch_opts(s)
     view_opts(s)
-    s.add_argument("--no-prices", action="store_true", help="Skip downloading prices")
+    s.add_argument("--prices", action="store_true",
+                   help="Also download prices from the PSX data portal (it refuses automated requests from GitHub's servers)")
     s.set_defaults(func=cmd_run)
     s = sub.add_parser("demo", help="Try it offline with synthetic data (use a separate --db)")
     s.add_argument("--videos", type=int, default=300)
