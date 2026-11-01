@@ -126,6 +126,9 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    A **Period** switch shows the last 7, 15, 21, 28 or 90 days (every view is computed when the report is written, so
    switching is instant; the link remembers it, e.g. `report.html#28`), and the stocks table filters by sector,
    YouTube call and minimum videos. The week-over-week columns always compare the last 7 days with the 7 before.
+   Opening a stock shows its **TradingView** chart (`PSX:<symbol>`, daily, 6 months) above the videos, with a link to
+   its TradingView page. The chart is the only part that needs internet: offline or in an app preview it shows the
+   link with a short note instead.
    Each stock has a one-line summary built from its numbers (also the `summary` column in the CSVs), e.g.
    "23 videos on 8 channels · 3 this week, none the week before · calls split: 3 buy, 3 sell".
 

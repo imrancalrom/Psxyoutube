@@ -81,6 +81,10 @@ tr.row:hover { background: var(--bg); }
 .pos { color: var(--bull); } .neg { color: var(--bear); }
 .foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
 .section { margin-bottom: 16px; }
+.tv { margin: 4px 0 12px; }
+.tvhead { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.tvchart { height: 360px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.tvchart .name { padding: 12px; }
 tr.has-note td { border-bottom: 0; padding-bottom: 2px; }
 tr.note td { padding-top: 0; color: var(--muted); font-size: 12px; white-space: normal; }
 tr.row.note:hover { background: none; }
@@ -272,7 +276,7 @@ function videoList(s, showAll) {
 }
 
 // A sortable table whose rows expand to show their videos. rows() is read on every render, so it follows the period.
-function table({ id, rows, key, cells, empty, filter = () => true, onRender = () => {}, note = null }) {
+function table({ id, rows, key, cells, empty, filter = () => true, onRender = () => {}, note = null, extra = null }) {
   const el = document.getElementById(id), cols = el.querySelectorAll("thead th").length;
   let sortKey = "buzz", sortDir = -1;
   const open = new Set(), showAll = new Set();
@@ -286,11 +290,13 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
     el.querySelector("tbody").innerHTML = shown.map(s =>
       `<tr class="row${note ? " has-note" : ""}" data-s="${esc(s[key])}">${cells(s)}</tr>` +
       (note ? `<tr class="row note" data-s="${esc(s[key])}"><td colspan="${cols}">${esc(note(s))}</td></tr>` : "") +
-      (open.has(s[key]) ? `<tr class="detail" data-s="${esc(s[key])}"><td colspan="${cols}">${videoList(s, showAll.has(s[key]))}</td></tr>` : "")
+      (open.has(s[key]) ? `<tr class="detail" data-s="${esc(s[key])}"><td colspan="${cols}">${extra ? extra(s) : ""}${videoList(s, showAll.has(s[key]))}</td></tr>` : "")
     ).join("") || `<tr><td colspan="${cols}">${empty}</td></tr>`;
     onRender(shown.length, all.length);
+    loadCharts(el);
   }
   el.querySelector("tbody").addEventListener("click", e => {
+    if (e.target.closest("a")) return;  // links (YouTube, TradingView) open without toggling the row
     const more = e.target.closest("button.more");
     if (more) { const k = more.closest("tr").dataset.s; showAll.has(k) ? showAll.delete(k) : showAll.add(k); render(); return; }
     const tr = e.target.closest("tr.row"); if (!tr) return;
@@ -300,6 +306,38 @@ function table({ id, rows, key, cells, empty, filter = () => true, onRender = ()
     const k = th.dataset.k; sortDir = sortKey === k ? -sortDir : -1; sortKey = k; render();
   }));
   return render;
+}
+
+// TradingView: a link for every stock, and its chart when the stock is opened. The chart needs internet, so offline
+// (or in an app preview) it falls back to the link with a short note instead of an empty box.
+const tvPage = sym => `https://www.tradingview.com/symbols/PSX-${encodeURIComponent(sym)}/`;
+function tradingView(s) {
+  return `<div class="tv"><div class="tvhead"><strong>${esc(s.symbol)} price</strong>
+      <a href="${tvPage(s.symbol)}" target="_blank" rel="noopener">Open PSX:${esc(s.symbol)} on TradingView ↗</a></div>
+    <div class="tvchart" data-symbol="PSX:${esc(s.symbol)}"></div></div>`;
+}
+function chartFailed(box, why) {
+  box.dataset.loaded = "failed";
+  box.style.height = "auto";
+  box.innerHTML = `<p class="name">${why} Use the TradingView link above to see the chart.</p>`;
+}
+function loadCharts(root) {
+  root.querySelectorAll(".tvchart:not([data-loaded])").forEach(box => {
+    box.dataset.loaded = "loading";
+    if (!navigator.onLine) return chartFailed(box, "The TradingView chart needs an internet connection.");
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    box.innerHTML = `<div class="tradingview-widget-container" style="height:100%"><div class="tradingview-widget-container__widget" style="height:100%"></div></div>`;
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+    script.text = JSON.stringify({ symbol: box.dataset.symbol, interval: "D", range: "6M", style: "1", locale: "en",
+      theme: dark ? "dark" : "light", autosize: true, hide_side_toolbar: true, allow_symbol_change: false,
+      save_image: false, calendar: false, support_host: "https://www.tradingview.com" });
+    script.onerror = () => chartFailed(box, "The TradingView chart couldn't load here.");
+    box.firstChild.appendChild(script);
+    // If nothing has appeared after a while (blocked, or no data for this symbol), say so instead of a blank box.
+    setTimeout(() => { if (box.isConnected && !box.querySelector("iframe")) chartFailed(box, "The TradingView chart didn't load."); }, 12000);
+  });
 }
 
 const q = document.getElementById("q"), fsec = document.getElementById("fsec");
@@ -313,7 +351,7 @@ function stockFilter(s) {
 }
 const renderStocks = table({
   id: "tbl", rows: () => DATA.stocks, key: "symbol", empty: "No stocks match these filters in this period.",
-  filter: stockFilter, note: s => s.summary,
+  filter: stockFilter, note: s => s.summary, extra: tradingView,
   onRender: (shown, all) => { document.getElementById("count").textContent = `Showing ${shown} of ${all} stocks`; },
   cells: s => `<td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
     <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
