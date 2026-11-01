@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, prices, youtube
+from psx_yt import cli, db, digest, prices, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -261,6 +261,42 @@ class PriceTests(unittest.TestCase):
             with self.assertRaises(prices.PriceError):
                 prices.parse_eod(bad)
 
+    def yahoo(self, symbol="OGDC", exchange="KAR", currency="PKR", n=40):
+        ts = [1761868800 - 86400 * i for i in range(n)][::-1]
+        return {"chart": {"error": None, "result": [{
+            "meta": {"symbol": f"{symbol}.KA", "exchangeName": exchange, "currency": currency, "regularMarketPrice": 131.87},
+            "timestamp": ts + [ts[-1] + 86400],
+            "indicators": {"quote": [{"close": [300.0 + i for i in range(n)] + [None], "volume": [1000] * n + [None]}]}}]}}
+
+    def test_parse_yahoo(self):
+        rows = prices.parse_yahoo("OGDC", self.yahoo())
+        self.assertEqual(len(rows), 40)                       # the day with no close is dropped
+        self.assertEqual(rows[-1], ("2025-10-31", 339.0, 1000))  # closes, never regularMarketPrice
+        for bad in (self.yahoo(exchange="NMS"), self.yahoo(currency="USD"), self.yahoo(n=10),
+                    {"chart": {"error": {"code": "Not Found"}, "result": None}}):
+            with self.assertRaises(prices.PriceError):
+                prices.parse_yahoo("OGDC", bad)
+        with self.assertRaises(prices.PriceError):  # asked for ATRL, got OGDC
+            prices.parse_yahoo("ATRL", self.yahoo())
+
+    def test_price_step_as_called_by_run(self):
+        # `run` passes its own arguments (no --probe); one stock's download fails, the other is stored.
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        today = date.today().isoformat()
+        db.upsert_video(conn, {"id": "v", "channel_id": "UC1", "title": "OGDC and HUBC", "published_at": today + "T10:00:00Z"})
+        conn.commit()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_analyze(argparse.Namespace(tickers=None), conn)
+        series = prices.parse_yahoo("OGDC", self.yahoo())
+        fetch = mock.Mock(side_effect=lambda sym: series if sym == "OGDC" else (_ for _ in ()).throw(prices.PriceError("HTTP 404")))
+        run_args = argparse.Namespace(days=90, transcripts=False, retry_captions=False, max=200, api_key=None, no_prices=False)
+        with mock.patch.object(prices, "fetch_yahoo", fetch), mock.patch.object(cli.time, "sleep"), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            cli.cmd_prices(run_args, conn)
+        self.assertIn("Prices: 1 of 2 stocks", out.getvalue())
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM prices WHERE symbol = 'OGDC'").fetchone()[0], 40)
+
     def test_moving_averages_and_rsi(self):
         self.assertEqual(prices.sma([1, 2, 3, 4, 5], 3), [None, None, 2.0, 3.0, 4.0])
         rising = [float(v) for v in range(1, 40)]
@@ -287,6 +323,34 @@ class PriceTests(unittest.TestCase):
         self.assertEqual([l["price"] for l in t["resistance"]], [120.0])
         self.assertIn("support 100 (", t["summary"])
         self.assertIsNone(prices.technicals(days[:20]))  # too little history
+
+
+class DigestTests(unittest.TestCase):
+    def test_digest(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        db.upsert_channel(conn, "UC2", "Chan 2")
+        now = datetime(2026, 11, 1, 16, 0, tzinfo=timezone.utc)
+        vids = [("a", "UC1", now - timedelta(hours=2), "Buy OGDC now"),           # last 24h, buy call
+                ("b", "UC2", now - timedelta(days=2), "Buy OGDC, target 300"),   # this week
+                ("c", "UC1", now - timedelta(days=3), "HUBC update"),            # this week
+                ("d", "UC2", now - timedelta(days=4), "HUBC results"),
+                ("e", "UC1", now - timedelta(days=9), "Sell PSO"),               # last week only
+                ("f", "UC1", now - timedelta(days=10), "PSO crash"),
+                ("g", "UC2", now - timedelta(days=40), "HUBC history")]          # older: HUBC isn't new
+        for vid, ch, ts, title in vids:
+            db.upsert_video(conn, {"id": vid, "channel_id": ch, "title": title, "published_at": ts.strftime("%Y-%m-%dT%H:%M:%SZ")})
+        conn.commit()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_analyze(argparse.Namespace(tickers=None), conn)
+        d = digest.build(conn, load_tickers(), now=now)
+        items = {s["title"]: s["items"] for s in d["sections"]}
+        self.assertEqual(items["Last 24 hours"], ["1 new video from 1 channel", "Stocks mentioned: OGDC", "Calls: OGDC buy (Chan 1)"])
+        week = items["This week vs last week"]
+        self.assertIn("Newly discussed (none in the 83 days before): OGDC (2)", week)  # HUBC was discussed 40 days ago
+        self.assertIn("Buzz fading: PSO 2→0", week)
+        self.assertIn("Buy calls this week: OGDC ×2 (2 channels)", week)
+        self.assertIn("**Last 24 hours**", digest.markdown(d))
 
 
 class CaptionTests(unittest.TestCase):

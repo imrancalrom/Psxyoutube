@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT))
 from psx_yt import cli, db  # noqa: E402
 
 BRANCH = "data"
-FILES = ["psx_yt.db", "report.html", "psx_buzz.csv", "psx_sectors.csv"]
+FILES = ["psx_yt.db", "report.html", "psx_buzz.csv", "psx_sectors.csv", "digest.md"]
 
 
 def git(*args: str, input: bytes | None = None) -> bytes:
@@ -71,6 +71,7 @@ def main(argv=None):
         cli.main([*dbarg, "report", "-o", str(out / "report.html")])
         cli.main([*dbarg, "export", "-o", str(out / "psx_buzz.csv")])
         cli.main([*dbarg, "export", "--sectors", "-o", str(out / "psx_sectors.csv")])
+        cli.main([*dbarg, "digest", "-o", str(out / "digest.md")])
 
         if args.keep:
             Path(args.keep).mkdir(parents=True, exist_ok=True)

@@ -118,6 +118,7 @@ made during its run).
 | `top [--days 90] [--limit 25]` | print the most discussed stocks and sectors |
 | `report [--days 90] [-o report.html]` | write the HTML dashboard |
 | `export [--days 90] [--sectors] [-o psx_buzz.csv]` | save the stock (or sector) leaderboard as CSV (opens in Excel), or everything as `.json` |
+| `digest [-o digest.md]` | short "what changed" note: last 24 hours, this week vs last week, sector shifts |
 | `run` | fetch + analyze + top + report |
 | `demo [--videos 300]` | synthetic data to try the dashboard |
 
@@ -156,21 +157,25 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    - channel breadth, total views, daily series, latest videos per stock
    - **Sectors** get the same stats, counting every video that names the sector *or* one of its stocks, so
      "Selling from Banks" and "Buy MEBL" both count for Banks. `Named` is how many videos named the sector itself.
-4. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
+4. **Daily digest**: each run also writes a short "what changed" note (`digest.md` on the `data` branch, the top of
+   the GitHub run page, and a box at the top of the dashboard): the last 24 hours' videos, stocks and calls; stocks
+   newly discussed this week; buzz rising and fading; this week's buy/hold/sell calls; and sector shifts.
+5. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
    download or inside app file previews): leaderboard tiles (including tone improving / worsening most), trend chart for the top 5 (daily up to 31 days, weekly for longer periods), buzz by sector,
    a sortable sectors table and a sortable/filterable stocks table; click a row to see the videos behind it.
    A **Period** switch shows the last 7, 15, 21, 28 or 90 days (every view is computed when the report is written, so
    switching is instant; the link remembers it, e.g. `report.html#28`), and the stocks table filters by sector,
    YouTube call and minimum videos. The week-over-week columns always compare the last 7 days with the 7 before.
-   Opening a stock shows a **technical chart** drawn from daily closes that the run downloads from the PSX data
-   portal (`prices` command, or `run --prices`; the portal refuses automated requests from GitHub's servers, so the
-   daily workflow doesn't fetch prices): close with SMA 50 / SMA 200, support (green) and
+   Opening a stock shows a **technical chart** drawn from daily closes that each run downloads from **Yahoo Finance**
+   (`<symbol>.KA`; only used after checking Yahoo says it is that symbol on the Karachi exchange in PKR, and only the
+   daily closes, since Yahoo's "current price" field disagrees with them for PSX stocks; `prices` command, part of
+   `run`, `--no-prices` skips it; the PSX data portal refuses GitHub's servers): close with SMA 50 / SMA 200, support (green) and
    resistance (red) levels from swing highs/lows over the past year with how often price touched them, and an RSI 14
    panel with 30/70 bands, plus a one-line summary ("Close 308 (+0.6%) · above SMA 50, below SMA 200 · RSI 62 ·
    support 290 (3×) · resistance 320 (2×)"; MACD 12/26/9, SMA 20 and the 52-week range are in the data too). It
-   needs no internet to view. Stocks without prices show **TradingView**'s chart instead (needs internet) with
-   TradingView's own indicators: Pivot Points Standard (support S1–S3 / resistance R1–R3), SMA 50 and 200, RSI 14 and
-   MACD; an "Indicators" checkbox turns them off (remembered per browser). Every stock links to its TradingView page.
+   needs no internet to view. Every stock links to its chart and overview on **TradingView**'s site, which has PSX
+   prices and indicators (Pivot Points Standard for support/resistance, moving averages, RSI, MACD). TradingView's
+   embeddable chart isn't used: it doesn't carry PSX stocks and silently shows a different company (Apple) instead.
    These are mechanical calculations, not advice.
    Each stock has a one-line summary built from its numbers (also the `summary` column in the CSVs), e.g.
    "23 videos on 8 channels · 3 this week, none the week before · calls split: 3 buy, 3 sell".
