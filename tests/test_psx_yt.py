@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, digest, notify, prices, track, youtube
+from psx_yt import cli, db, digest, notify, prices, track, watchlist, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -406,6 +406,33 @@ class DigestTests(unittest.TestCase):
         self.assertIn("Buzz fading: PSO 2→0", week)
         self.assertIn("Buy calls this week: OGDC ×2 (2 channels)", week)
         self.assertIn("**Last 24 hours**", digest.markdown(d))
+
+        # A watchlist adds a first section, one line per watched stock, without changing the rest.
+        w = digest.build(conn, load_tickers(), now=now, watchlist=["OGDC", "PSO", "LUCK"])
+        self.assertEqual(w["sections"][0]["title"], "Your watchlist")
+        self.assertEqual(w["sections"][0]["items"], [
+            "OGDC: 1 new video in the last 24 hours · 2 videos this week (0 the week before) · calls this week: 2 buy",
+            "PSO: 0 videos this week (2 the week before)",
+            "LUCK: no videos in the last two weeks"])
+        self.assertEqual(w["sections"][1:], d["sections"])
+        self.assertTrue(all(isinstance(sec["items"], list) for sec in w["sections"]))
+
+
+class WatchlistTests(unittest.TestCase):
+    def test_parse(self):
+        self.assertEqual(watchlist.parse("ogdc, PSO\n# comment\nLUCK  hubc # held\nogdc"), ["OGDC", "PSO", "LUCK", "HUBC"])
+
+    def test_load_merges_file_and_env_and_skips_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "watchlist.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("OGDC\nNOTASTOCK\n")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                got = watchlist.load(path, load_tickers(), env="pso, ogdc")
+        self.assertEqual(got, ["OGDC", "PSO"])
+        self.assertIn("NOTASTOCK", err.getvalue())
+        self.assertEqual(watchlist.load(os.path.join(tmp, "missing.txt"), load_tickers(), env=""), [])
 
 
 class TrackTests(unittest.TestCase):

@@ -9,6 +9,7 @@
 #   variable FETCH_TRANSCRIPTS    "true" to read captions (YouTube often blocks these from cloud runners)
 #   secrets  TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID   send the daily digest to Telegram (see README)
 #   Settings → Pages → Source: GitHub Actions          publish the dashboard at https://<owner>.github.io/<repo>/
+#   variable WATCHLIST            stocks you follow, e.g. "OGDC PSO MEBL" (or commit a watchlist.txt)
 name: Daily PSX YouTube run
 
 on:
@@ -52,6 +53,7 @@ jobs:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      WATCHLIST: ${{ vars.WATCHLIST }}
     steps:
       - uses: actions/checkout@v4
 

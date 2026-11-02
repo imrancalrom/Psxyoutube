@@ -1,0 +1,7 @@
+# Stocks you hold or follow: the dashboard and the daily digest (and Telegram message) put them first.
+# Copy this file to watchlist.txt and list PSX symbols, one or more per line. Lines after # are comments.
+# Or leave the file out and set a repository variable WATCHLIST instead (Settings → Secrets and variables →
+# Actions → Variables), e.g. "OGDC PSO MEBL".
+OGDC
+PSO
+MEBL
