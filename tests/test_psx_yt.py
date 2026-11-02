@@ -275,6 +275,10 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(videos, {"7": 1, "90": 2})  # the 40-day-old video only shows in the 90-day view
         self.assertEqual(sorted(data["videos"]), ["new", "old"])  # each video stored once
         self.assertEqual([ref[0] for ref in data["periods"]["90"]["stocks"][0]["v"]], ["new", "old"])
+        # What the channel filter rebuilds figures from: [id, call, tone, in title, sector named outright]
+        self.assertEqual(data["periods"]["90"]["stocks"][0]["v"][0], ["new", "buy", 1, 1, 0])
+        self.assertEqual(data["periods"]["7"]["channel_videos"], {"Chan 1": 1})
+        self.assertEqual(data["periods"]["90"]["channel_videos"], {"Chan 1": 2})
 
 
 class PriceTests(unittest.TestCase):

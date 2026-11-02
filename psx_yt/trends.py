@@ -124,6 +124,7 @@ def _aggregate(rows, start: date, today: date, window: int, dates: list[str], mi
         a["video_list"].append({
             "id": r["video_id"], "title": r["title"], "channel": r["channel_title"] or r["channel_id"],
             "published": d.isoformat(), "views": r["views"] or 0, "sentiment": tone, "call": call,
+            "in_title": 1 if r["in_title"] else 0, "direct": 1 if r.get("direct") else 0,  # direct: sector named outright
         })
 
     result = []
@@ -219,10 +220,15 @@ def compute(conn, stocks: dict[str, Stock], days: int = 90, window: int = 7, tod
     total_videos = conn.execute(
         "SELECT COUNT(*) FROM videos WHERE substr(published_at, 1, 10) >= ?", (start.isoformat(),)
     ).fetchone()[0]
+    # Videos per channel in the period (every tracked channel, even with none), for the dashboard's channel filter.
+    channel_videos = {r[0]: r[1] for r in conn.execute(
+        """SELECT COALESCE(c.title, c.id), COUNT(v.id) FROM channels c
+           LEFT JOIN videos v ON v.channel_id = c.id AND substr(v.published_at, 1, 10) >= ?
+           GROUP BY c.id ORDER BY 1""", (start.isoformat(),))}
     return {
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "start": start.isoformat(), "end": today.isoformat(), "days": days, "window": window,
         "dates": dates, "stocks": stock_stats, "sectors": sector_stats,
-        "video_count": total_videos,
+        "video_count": total_videos, "channel_videos": channel_videos,
         "channel_count": conn.execute("SELECT COUNT(*) FROM channels").fetchone()[0],
     }

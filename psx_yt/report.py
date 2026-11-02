@@ -87,6 +87,22 @@ tr.row:hover { background: var(--bg); }
 #logtbl td.vid { white-space: normal; min-width: 240px; max-width: 420px; }
 #logtbl td.vid a { color: var(--accent); }
 .calls { margin: 0 0 10px; }
+.chsel { position: relative; }
+.chsel summary { list-style: none; cursor: pointer; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); font-size: 13px; white-space: nowrap; }
+.chsel summary::-webkit-details-marker { display: none; }
+.chsel summary::after { content: " ▾"; color: var(--muted); }
+.chsel[data-on] summary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.chlist { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: 240px; max-width: calc(100vw - 32px);
+  max-height: 60vh; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
+.chlist label { display: flex; gap: 8px; align-items: center; padding: 4px 0; font-size: 13px; cursor: pointer; }
+.chlist label .name { margin-left: auto; padding-left: 12px; }
+.chbtns { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+@media (max-width: 600px) {
+  .chsel { flex-basis: 100%; }
+  .chlist { position: static; min-width: 0; max-width: none; margin-top: 4px; box-shadow: none; }
+}
 .digest { margin-bottom: 16px; }
 .digest summary { cursor: pointer; line-height: 1.6; }
 .digest h3 { font-size: 13px; margin: 12px 0 4px; }
@@ -121,7 +137,13 @@ tr.row.note:hover { background: none; }
   <h1>PSX stocks on YouTube</h1>
   <div class="sub" id="sub"></div>
   <details class="card digest" id="digest" open></details>
-  <div class="toolbar"><span class="lbl">Period</span><div class="seg" id="periods" role="group" aria-label="Period"></div></div>
+  <div class="toolbar"><span class="lbl">Period</span><div class="seg" id="periods" role="group" aria-label="Period"></div>
+    <span class="lbl">Channels</span>
+    <details class="chsel" id="chsel"><summary id="chsum">All channels</summary>
+      <div class="chlist"><div class="chbtns"><button type="button" class="link" id="chall">All</button>
+        <button type="button" class="link" id="chnone">None</button></div><div id="chboxes"></div></div>
+    </details>
+  </div>
   <div class="tiles" id="tiles"></div>
   <div class="grid">
     <div class="card"><h2 id="lineTitle">Daily videos mentioning the top 5 stocks</h2><div class="chart" id="line"></div></div>
@@ -356,7 +378,9 @@ function drawTrack() {
 
 function drawHeader() {
   document.getElementById("sub").textContent = `Last ${DATA.days} days: ${DATA.start} to ${DATA.end} · ` +
-    `${DATA.channel_count} channels · ${DATA.video_count} videos · generated ${DATA.generated}` + captionNote();
+    `${DATA.channel_count} channel${DATA.channel_count === 1 ? "" : "s"} · ${DATA.video_count} videos · ` +
+    `generated ${DATA.generated}` + captionNote() +
+    (CHANS ? ` · filtered to ${CHANS.size} of ${CHANNELS.length} channels` : "");
 }
 
 // Most buy/sell calls are spoken, so say how much of the archive has had its captions read.
@@ -637,16 +661,139 @@ function fillSectors() {
   fsec.value = names.includes(keep) ? keep : "";
 }
 
+// Channel filter: stock and sector figures are rebuilt in the browser from the selected channels' videos, with the
+// same rules as psx_yt/trends.py. The track record, call log and digest are not filtered by it.
+const LONGEST = ALL.periods[Math.max(...PERIODS)];  // its video lists cover the two weeks the 7d numbers need
+const CHANNELS = Object.keys(LONGEST.channel_videos || {}).sort((a, b) => a.localeCompare(b));
+let CHANS = null;  // null = every channel
+const round2 = x => Math.round(x * 100) / 100;
+const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 864e5);
+function trendLabel(recent, previous) {
+  if (!recent && !previous) return "QUIET";
+  if (!previous) return "NEW";
+  const r = recent / previous;
+  return r >= 1.5 && recent >= 2 ? "RISING" : r <= 0.67 ? "FALLING" : "STEADY";
+}
+function toneLabel(recent, previous) {
+  if (recent === null || previous === null) return "-";
+  const c = recent - previous;
+  return c >= 0.25 ? "IMPROVING" : c <= -0.25 ? "WORSENING" : "STABLE";
+}
+function callLabel(buy, hold, sell, min = 3) {
+  const n = buy + hold + sell;
+  if (n < min) return "-";
+  const r = [["BUY", buy], ["HOLD", hold], ["SELL", sell]].sort((a, b) => b[1] - a[1]);
+  return r[0][1] * 2 >= n && r[0][1] > r[1][1] ? r[0][0] : "MIXED";
+}
+function summaryLine(a) {
+  const n = (c, w) => `${c} ${w}${c === 1 ? "" : "s"}`;
+  const coverage = n(a.videos, "video") + (a.channel_count === 1 ? " on 1 channel only" : ` on ${a.channel_count} channels`);
+  const momentum = {
+    NEW: a.recent === a.videos ? `new this week (${a.recent})` : `${a.recent} this week, none the week before`,
+    RISING: `buzz rising (${a.previous}→${a.recent} a week)`, FALLING: `buzz fading (${a.previous}→${a.recent} a week)`,
+    STEADY: `steady (${a.recent} this week)`, QUIET: "quiet in the last two weeks",
+  }[a.trend];
+  const counts = [[a.buy_calls, "buy"], [a.hold, "hold"], [a.sell_calls, "sell"]].filter(([c]) => c)
+    .map(([c, w]) => `${c} ${w}`).join(", ");
+  const calls = {BUY: `channels lean BUY (${counts})`, SELL: `channels lean SELL (${counts})`,
+    HOLD: `mostly HOLD calls (${counts})`, MIXED: `calls split: ${counts}`}[a.call]
+    || (counts ? `few calls so far (${counts})` : "no buy/sell calls yet");
+  const parts = [coverage, momentum, calls];
+  if (a.tone_trend === "IMPROVING") parts.push("tone improving");
+  else if (a.tone_trend === "WORSENING") parts.push("tone turning bearish");
+  return parts.join(" · ");
+}
+function aggregate(items, longest, keyName, d) {
+  const idx = Object.fromEntries(d.dates.map((x, i) => [x, i]));
+  const longBy = new Map(longest.map(x => [x[keyName], x]));
+  const out = [];
+  for (const it of items) {
+    const refs = it.v.filter(r => CHANS.has(ALL.videos[r[0]][1]));
+    if (!refs.length) continue;
+    const a = {...it, v: refs, videos: refs.length, views: 0, buzz: 0, bullish: 0, bearish: 0, neutral: 0,
+               buy_calls: 0, sell_calls: 0, hold: 0};
+    const ch = new Set(), series = d.dates.map(() => 0);
+    let direct = 0;
+    for (const [id, call, tone, inTitle, dir] of refs) {
+      const [, channel, published, views] = ALL.videos[id];
+      a.views += views;
+      a.buzz += (inTitle ? 2 : 1) * (1 + Math.log10(1 + views));
+      a[tone > 0 ? "bullish" : tone < 0 ? "bearish" : "neutral"]++;
+      if (call === "buy") a.buy_calls++; else if (call === "sell") a.sell_calls++; else if (call === "hold") a.hold++;
+      ch.add(channel);
+      if (published in idx) series[idx[published]]++;
+      direct += dir ? 1 : 0;
+    }
+    a.channels = [...ch].sort();
+    a.channel_count = ch.size;
+    a.buzz = Math.round(a.buzz * 10) / 10;
+    a.sentiment_score = round2((a.bullish - a.bearish) / a.videos);
+    a.call = callLabel(a.buy_calls, a.hold, a.sell_calls);
+    const calls = a.buy_calls + a.hold + a.sell_calls;
+    a.call_score = a.call !== "-" ? round2((a.buy_calls - a.sell_calls) / calls) : null;
+    const w = [0, 0, 0, 0], long = longBy.get(it[keyName]);  // recent, previous, net tone recent, net tone previous
+    for (const [id, , tone] of long ? long.v : []) {
+      const [, channel, published] = ALL.videos[id];
+      if (!CHANS.has(channel)) continue;
+      const age = dayDiff(d.end, published);
+      if (age >= 0 && age < 2 * d.window) { const k = age < d.window ? 0 : 1; w[k]++; w[k + 2] += Math.sign(tone); }
+    }
+    [a.recent, a.previous] = w;
+    a.trend = trendLabel(a.recent, a.previous);
+    a.tone_recent = w[0] >= 3 ? round2(w[2] / w[0]) : null;
+    a.tone_previous = w[1] >= 3 ? round2(w[3] / w[1]) : null;
+    a.tone_change = a.tone_recent !== null && a.tone_previous !== null ? round2(a.tone_recent - a.tone_previous) : null;
+    a.tone_trend = toneLabel(a.tone_recent, a.tone_previous);
+    a.series = series;
+    if (keyName === "sector") a.direct_videos = direct;
+    a.summary = summaryLine(a);
+    out.push(a);
+  }
+  return out.sort((x, y) => y.buzz - x.buzz);
+}
+function derive(d) {
+  const stocks = aggregate(d.stocks, LONGEST.stocks, "symbol", d);
+  const sectors = aggregate(d.sectors, LONGEST.sectors, "sector", d);
+  for (const sec of sectors) {
+    sec.stocks = stocks.filter(s => s.sector === sec.sector).sort((a, b) => b.videos - a.videos).slice(0, 8).map(s => s.symbol);
+  }
+  const counts = d.channel_videos || {};
+  return {...d, stocks, sectors, channel_count: CHANS.size,
+          video_count: [...CHANS].reduce((n, c) => n + (counts[c] || 0), 0)};
+}
+function drawChannelPicker() {
+  const box = document.getElementById("chboxes"), sel = document.getElementById("chsel");
+  if (!CHANNELS.length) { sel.remove(); return; }
+  box.innerHTML = CHANNELS.map(c => `<label><input type="checkbox" value="${esc(c)}" checked> ${esc(c)}
+    <span class="name">${LONGEST.channel_videos[c]}</span></label>`).join("");
+  const apply = () => {
+    const on = [...box.querySelectorAll("input:checked")].map(i => i.value);
+    CHANS = on.length === CHANNELS.length ? null : new Set(on);
+    document.getElementById("chsum").textContent = !CHANS ? "All channels"
+      : on.length === 1 ? on[0] : `${on.length} of ${CHANNELS.length} channels`;
+    CHANS ? sel.setAttribute("data-on", "") : sel.removeAttribute("data-on");
+    setPeriod(DAYS);
+  };
+  box.addEventListener("change", apply);
+  const all = v => () => { box.querySelectorAll("input").forEach(i => { i.checked = v; }); apply(); };
+  document.getElementById("chall").addEventListener("click", all(true));
+  document.getElementById("chnone").addEventListener("click", all(false));
+  document.addEventListener("click", e => { if (!sel.contains(e.target)) sel.removeAttribute("open"); });
+}
+
 const periodBox = document.getElementById("periods");
 periodBox.innerHTML = PERIODS.map(d => `<button type="button" data-d="${d}">${d} days</button>`).join("");
+let DAYS = ALL.default;
 function setPeriod(d) {
-  DATA = ALL.periods[d];
+  DAYS = d;
+  DATA = CHANS ? derive(ALL.periods[d]) : ALL.periods[d];
   periodBox.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.d) === d)));
   drawHeader(); drawTiles(); drawCharts(); fillSectors(); renderStocks(); renderSectors();
   try { history.replaceState(null, "", "#" + d); } catch (e) { /* e.g. inside a sandboxed preview */ }
 }
 periodBox.addEventListener("click", e => { const b = e.target.closest("button"); if (b) setPeriod(Number(b.dataset.d)); });
 const fromLink = Number(location.hash.slice(1));
+drawChannelPicker();
 setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
 drawTrack();
 drawLog();
@@ -667,7 +814,7 @@ def write_report(periods: dict[int, dict], path: str | Path, default: int, tech:
         refs = []
         for v in item["video_list"]:
             videos[v["id"]] = [v["title"], v["channel"], v["published"], v["views"]]
-            refs.append([v["id"], v["call"]])
+            refs.append([v["id"], v["call"], v["sentiment"], v["in_title"], v["direct"]])
         return {**{k: x for k, x in item.items() if k != "video_list"}, "v": refs}
 
     data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
