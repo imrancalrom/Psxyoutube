@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import db, digest, prices, track, youtube
+from . import db, digest, notify, prices, track, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                        strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
@@ -308,6 +308,33 @@ def cmd_digest(args, conn):
         print(text)
 
 
+def cmd_notify(args, conn):
+    """Send the digest to Telegram (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID), or list the chats that messaged the bot."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if args.find_chat:
+        if not token:
+            sys.exit("Set TELEGRAM_BOT_TOKEN first (in the workflow: the TELEGRAM_BOT_TOKEN secret).")
+        chats = notify.find_chats(token)
+        if not chats:
+            print("No chats found. Send your bot a message in Telegram (or add it to a group/channel and post there), "
+                  "then run this again within a day.")
+        for c in chats:
+            print(f"Chat id {c['id']}  ({c['type']}: {c['name']})")
+        return
+    text = notify.message(digest.build(conn, load_tickers(args.tickers)), link=args.link)
+    chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if args.dry_run or not (token and chat):
+        if not args.dry_run:
+            print("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID aren't both set; this is what would be sent:\n")
+        print(text)
+        return
+    try:
+        n = notify.send(token, chat, text)
+    except notify.TelegramError as e:
+        sys.exit(f"Telegram alert not sent: {e}")
+    print(f"Sent the digest to Telegram ({n} message{'s' if n != 1 else ''})")
+
+
 def cmd_run(args, conn):
     cmd_fetch(args, conn)
     cmd_analyze(args, conn)
@@ -425,6 +452,11 @@ def main(argv=None):
     s = sub.add_parser("digest", help="Print (or save) a short 'what changed' note: last 24 hours and this week")
     s.add_argument("-o", "--output", help="Markdown file to write instead of printing")
     s.set_defaults(func=cmd_digest)
+    s = sub.add_parser("notify", help="Send the digest to Telegram ($TELEGRAM_BOT_TOKEN, $TELEGRAM_CHAT_ID)")
+    s.add_argument("--link", help="Link to add at the end (e.g. the workflow run with the dashboard)")
+    s.add_argument("--dry-run", action="store_true", help="Print the message instead of sending it")
+    s.add_argument("--find-chat", action="store_true", help="List the chats that recently messaged the bot")
+    s.set_defaults(func=cmd_notify)
     s = sub.add_parser("run", help="fetch + analyze + prices + top + report")
     fetch_opts(s)
     view_opts(s)

@@ -7,6 +7,7 @@
 # Setup: commit a channels.txt (see channels.example.txt). Optional:
 #   secret   YOUTUBE_API_KEY      full upload history instead of the latest ~15 videos per channel
 #   variable FETCH_TRANSCRIPTS    "true" to read captions (YouTube often blocks these from cloud runners)
+#   secrets  TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID   send the daily digest to Telegram (see README)
 name: Daily PSX YouTube run
 
 on:
@@ -20,6 +21,10 @@ on:
         default: false
       retry_captions:
         description: Retry videos earlier marked as having no captions (needs captions on)
+        type: boolean
+        default: false
+      find_telegram_chat:
+        description: Print the chat ids that messaged your Telegram bot (to fill in the TELEGRAM_CHAT_ID secret)
         type: boolean
         default: false
       probe_prices:
@@ -40,6 +45,8 @@ jobs:
     timeout-minutes: 60
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +56,10 @@ jobs:
           cache: pip
 
       - run: pip install -r requirements.txt
+
+      - name: Find Telegram chat id
+        if: ${{ inputs.find_telegram_chat }}
+        run: python -m psx_yt --db probe.db notify --find-chat
 
       - name: Probe PSX price endpoints (diagnostic)
         if: ${{ inputs.probe_prices }}
@@ -104,6 +115,13 @@ jobs:
             out/psx_sectors.csv
             out/digest.md
           retention-days: 30
+
+      - name: Send the digest to Telegram
+        # Runs before the save step, which swaps the checkout for the data branch. A Telegram problem marks this
+        # step failed but doesn't stop the data from being saved.
+        if: ${{ !inputs.probe_prices && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        continue-on-error: true
+        run: python -m psx_yt --db out/psx_yt.db notify --link "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - name: Save database to the data branch
         if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic

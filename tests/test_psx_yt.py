@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, digest, prices, track, youtube
+from psx_yt import cli, db, digest, notify, prices, track, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -439,6 +439,62 @@ class TrackTests(unittest.TestCase):
         self.assertIsNotNone(calls["d"]["move5"])
         self.assertEqual((calls["e"]["call"], calls["e"]["entry"], calls["e"]["now"]), ("buy", None, None))
         self.assertEqual(len(t["calls"]), 5)
+
+
+class NotifyTests(unittest.TestCase):
+    D = {"title": "PSX YouTube digest, 02 Nov 2026", "headline": "5 videos", "date": "2026-11-02",
+         "sections": [{"title": "Sectors", "items": ["Oil & Gas E&P: buzz rising 2→3", "<b>x</b>"]}]}
+
+    def test_message_escapes_html(self):
+        m = notify.message(self.D, link="https://github.com/o/r/actions/runs/1?a=1&b=2")
+        self.assertIn("<b>Sectors</b>\n• Oil &amp; Gas E&amp;P: buzz rising 2→3\n• &lt;b&gt;x&lt;/b&gt;", m)
+        self.assertIn('href="https://github.com/o/r/actions/runs/1?a=1&amp;b=2"', m)
+        self.assertIn("Not investment advice", m)
+
+    def test_split(self):
+        self.assertEqual(notify.split("a\nb\nc", limit=3), ["a\nb", "c"])
+        self.assertEqual(notify.split("abcdefg", limit=3), ["abc", "def", "g"])
+        parts = notify.split("\n".join(["x" * 50] * 200), limit=4096)
+        self.assertTrue(all(len(p) <= 4096 for p in parts))
+        self.assertEqual("\n".join(parts), "\n".join(["x" * 50] * 200))
+
+    def test_send_to_each_chat(self):
+        ok = mock.Mock(status_code=200, json=lambda: {"ok": True, "result": {}})
+        with mock.patch.object(notify.requests, "post", return_value=ok) as post:
+            self.assertEqual(notify.send("TOKEN", "1, -100200", "hello"), 2)
+        self.assertEqual([c.kwargs["json"]["chat_id"] for c in post.call_args_list], ["1", "-100200"])
+        self.assertEqual(post.call_args.args[0], "https://api.telegram.org/botTOKEN/sendMessage")
+        self.assertEqual(post.call_args.kwargs["json"]["parse_mode"], "HTML")
+
+    def test_errors_never_show_the_token(self):
+        bad = mock.Mock(status_code=401, json=lambda: {"ok": False, "description": "Unauthorized"})
+        with mock.patch.object(notify.requests, "post", return_value=bad):
+            with self.assertRaises(notify.TelegramError) as e:
+                notify.send("SECRET123", "1", "hi")
+        self.assertIn("TELEGRAM_BOT_TOKEN", str(e.exception))
+        self.assertNotIn("SECRET123", str(e.exception))
+        down = notify.requests.ConnectionError("https://api.telegram.org/botSECRET123/sendMessage failed")
+        with mock.patch.object(notify.requests, "post", side_effect=down):
+            with self.assertRaises(notify.TelegramError) as e:
+                notify.send("SECRET123", "1", "hi")
+        self.assertNotIn("SECRET123", str(e.exception))
+
+    def test_find_chats(self):
+        updates = {"ok": True, "result": [
+            {"message": {"chat": {"id": 42, "type": "private", "first_name": "Imran"}}},
+            {"message": {"chat": {"id": 42, "type": "private", "first_name": "Imran"}}},
+            {"my_chat_member": {"chat": {"id": -1001, "type": "channel", "title": "PSX alerts"}}}]}
+        with mock.patch.object(notify.requests, "post", return_value=mock.Mock(status_code=200, json=lambda: updates)):
+            self.assertEqual(notify.find_chats("T"), [{"id": 42, "type": "private", "name": "Imran"},
+                                                      {"id": -1001, "type": "channel", "name": "PSX alerts"}])
+
+    def test_notify_without_secrets_prints_preview(self):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}), \
+                mock.patch.object(notify.requests, "post") as post, contextlib.redirect_stdout(out):
+            cli.main(["--db", ":memory:", "notify"])
+        post.assert_not_called()
+        self.assertIn("this is what would be sent", out.getvalue())
 
 
 class CaptionTests(unittest.TestCase):
