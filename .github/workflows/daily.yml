@@ -8,6 +8,7 @@
 #   secret   YOUTUBE_API_KEY      full upload history instead of the latest ~15 videos per channel
 #   variable FETCH_TRANSCRIPTS    "true" to read captions (YouTube often blocks these from cloud runners)
 #   secrets  TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID   send the daily digest to Telegram (see README)
+#   Settings → Pages → Source: GitHub Actions          publish the dashboard at https://<owner>.github.io/<repo>/
 name: Daily PSX YouTube run
 
 on:
@@ -34,6 +35,8 @@ on:
 
 permissions:
   contents: write
+  pages: write     # publish the dashboard on GitHub Pages (when it is turned on)
+  id-token: write  # required by actions/deploy-pages
 
 concurrency:
   group: psx-yt-data
@@ -43,6 +46,8 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      pages_url: ${{ steps.pages.outputs.url }}
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -116,12 +121,44 @@ jobs:
             out/digest.md
           retention-days: 30
 
+      - name: Check whether GitHub Pages is on
+        id: pages
+        if: ${{ !inputs.probe_prices }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url 2>/dev/null) && [ -n "$url" ]; then
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            echo "Publishing the dashboard to $url"
+          else
+            echo "::notice::GitHub Pages is off, so the dashboard is only in this run's artifacts. To get a fixed link, turn it on: Settings → Pages → Source: GitHub Actions."
+          fi
+
+      - name: Prepare the dashboard site
+        if: ${{ steps.pages.outputs.url != '' }}
+        run: |
+          mkdir -p site
+          cp out/report.html site/index.html
+          cp out/psx_buzz.csv out/psx_sectors.csv out/digest.md site/
+
+      - uses: actions/upload-pages-artifact@v3
+        if: ${{ steps.pages.outputs.url != '' }}
+        with:
+          path: site
+
       - name: Send the digest to Telegram
         # Runs before the save step, which swaps the checkout for the data branch. A Telegram problem marks this
         # step failed but doesn't stop the data from being saved.
         if: ${{ !inputs.probe_prices && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         continue-on-error: true
-        run: python -m psx_yt --db out/psx_yt.db notify --link "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        env:
+          PAGES_URL: ${{ steps.pages.outputs.url }}
+        run: |
+          if [ -n "$PAGES_URL" ]; then
+            python -m psx_yt --db out/psx_yt.db notify --link "$PAGES_URL" --link-text "Open the dashboard"
+          else
+            python -m psx_yt --db out/psx_yt.db notify --link "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
 
       - name: Save database to the data branch
         if: ${{ !inputs.probe_prices }}  # a probe run only prints the diagnostic
@@ -135,3 +172,15 @@ jobs:
           # Only replace the data we started from: if scripts/local_captions.py pushed meanwhile, fail rather than
           # drop its captions (the next run starts from them). An empty DATA_BASE means "data must not exist yet".
           git push --force-with-lease="refs/heads/data:${DATA_BASE:-}" origin data-new:data
+
+  # Publishes the dashboard prepared above; skipped while GitHub Pages is off.
+  publish:
+    needs: run
+    if: ${{ needs.run.outputs.pages_url != '' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

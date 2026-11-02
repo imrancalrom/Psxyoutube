@@ -321,7 +321,8 @@ def cmd_notify(args, conn):
         for c in chats:
             print(f"Chat id {c['id']}  ({c['type']}: {c['name']})")
         return
-    text = notify.message(digest.build(conn, load_tickers(args.tickers)), link=args.link)
+    text = notify.message(digest.build(conn, load_tickers(args.tickers)), link=args.link,
+                          link_text=args.link_text or notify.RUN_LINK_TEXT)
     chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if args.dry_run or not (token and chat):
         if not args.dry_run:
@@ -453,7 +454,8 @@ def main(argv=None):
     s.add_argument("-o", "--output", help="Markdown file to write instead of printing")
     s.set_defaults(func=cmd_digest)
     s = sub.add_parser("notify", help="Send the digest to Telegram ($TELEGRAM_BOT_TOKEN, $TELEGRAM_CHAT_ID)")
-    s.add_argument("--link", help="Link to add at the end (e.g. the workflow run with the dashboard)")
+    s.add_argument("--link", help="Link to add at the end (e.g. the published dashboard or the workflow run)")
+    s.add_argument("--link-text", help="Text for that link (default: points to the run's artifacts)")
     s.add_argument("--dry-run", action="store_true", help="Print the message instead of sending it")
     s.add_argument("--find-chat", action="store_true", help="List the chats that recently messaged the bot")
     s.set_defaults(func=cmd_notify)

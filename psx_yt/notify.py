@@ -17,14 +17,18 @@ class TelegramError(RuntimeError):
     pass
 
 
-def message(d: dict, link: str | None = None) -> str:
-    """The digest as Telegram HTML: bold title and section names, bullet lists, an optional link to the run."""
+RUN_LINK_TEXT = "Dashboard and files (Artifacts → psx-yt-report)"
+
+
+def message(d: dict, link: str | None = None, link_text: str = RUN_LINK_TEXT) -> str:
+    """The digest as Telegram HTML: bold title and section names, bullet lists, an optional link at the end (the
+    published dashboard, or the workflow run whose artifacts hold it)."""
     e = html.escape
     lines = [f"<b>{e(d['title'])}</b>", e(d["headline"])]
     for s in d["sections"]:
         lines += ["", f"<b>{e(s['title'])}</b>"] + [f"• {e(item)}" for item in s["items"]]
     if link:
-        lines += ["", f'<a href="{e(link, quote=True)}">Dashboard and files</a> (Artifacts → psx-yt-report)']
+        lines += ["", f'<a href="{e(link, quote=True)}">{e(link_text)}</a>']
     lines += ["", "<i>What the tracked channels said, detected from keywords; technical signals are mechanical "
                   "calculations from daily closes. Not investment advice.</i>"]
     return "\n".join(lines)
