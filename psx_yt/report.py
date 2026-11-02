@@ -83,6 +83,9 @@ tr.row:hover { background: var(--bg); }
 .section { margin-bottom: 16px; }
 #tracktbl tr.few td { color: var(--muted); }
 #tracktbl tr.total td { font-weight: 600; }
+#logtbl td.vid { white-space: normal; min-width: 240px; max-width: 420px; }
+#logtbl td.vid a { color: var(--accent); }
+.calls { margin: 0 0 10px; }
 .digest { margin-bottom: 16px; }
 .digest summary { cursor: pointer; line-height: 1.6; }
 .digest h3 { font-size: 13px; margin: 12px 0 4px; }
@@ -156,6 +159,35 @@ tr.row.note:hover { background: none; }
       ones. Click a channel to see its calls: each result is the price move, green when it went the called way (a sell call
       followed by a fall is green). Covers all stored videos, whatever period is selected above.</div>
   </div>
+  <div class="card section" id="logcard">
+    <h2>Call log</h2>
+    <div class="toolbar">
+      <input type="search" id="lq" placeholder="Stock symbol" aria-label="Filter calls by stock">
+      <select id="lch" aria-label="Channel"></select>
+      <select id="lcall" aria-label="Call">
+        <option value="">All calls</option><option value="buy">Buy</option><option value="sell">Sell</option>
+        <option value="hold">Hold</option>
+      </select>
+      <button type="button" id="lreset" class="link">Reset</button>
+      <span class="name" id="lcount"></span>
+    </div>
+    <div class="tablewrap"><table id="logtbl">
+      <thead><tr>
+        <th>Date</th><th>Stock</th><th>Call</th><th>Channel</th>
+        <th class="num" title="Close on the first trading day after the video">Entry</th>
+        <th class="num" title="Price move from the entry to the latest close; green when it went the called way">Since call</th>
+        <th class="num" title="Price move 5 trading days after the entry">5 days</th>
+        <th class="num" title="Price move 20 trading days after the entry">20 days</th>
+        <th class="num" title="20-day move in the called direction minus the average move of all priced stocks">20d vs market</th>
+        <th>Video</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="foot">Every explicit buy, sell or hold call the tracked channels made, newest first, from all stored videos
+      whatever period is selected above. Moves are price changes from Yahoo Finance daily closes, green when they went
+      the called way (a fall after a sell call is green); hold calls have no direction. "–" means no prices for that stock
+      or no trading day since the video. Calls are detected from keywords; not investment advice.</div>
+  </div>
   <div class="card">
     <h2>All stocks discussed</h2>
     <div class="toolbar">
@@ -213,16 +245,85 @@ function drawDigest() {
 }
 drawDigest();
 
+// Call log: every explicit call, filterable; also used for the "Calls on this stock" list in an opened stock.
+const LOG_PAGE = 50;
+const CALLS = (ALL.track && ALL.track.calls) || [];
+const callClass = c => ({buy: "pos", sell: "neg", hold: "holdc"}[c]);
+// A price move, coloured by whether it went the called way (hold calls stay plain).
+function moveCell(c, v) {
+  if (v === null || v === undefined) return `<span class="name">–</span>`;
+  const side = {buy: 1, sell: -1}[c.call] || 0, good = side * v > 0, bad = side * v < 0;
+  return `<span class="${good ? "pos" : bad ? "neg" : ""}">${v > 0 ? "+" : ""}${v.toFixed(1)}%</span>`;
+}
+const pending = c => c.entry === null ? `<span class="name">–</span>` : `<span class="name">pending</span>`;
+const horizonCell = (c, h) => c["move" + h] === null ? pending(c) : moveCell(c, c["move" + h]);
+function vsMarket(c) {
+  const h = ALL.track.horizons[1], side = {buy: 1, sell: -1}[c.call];
+  if (!side || c["move" + h] === null || c["market" + h] === null) return `<span class="name">–</span>`;
+  const x = side * (c["move" + h] - c["market" + h]);
+  return `<span class="${x > 0 ? "pos" : x < 0 ? "neg" : ""}">${x > 0 ? "+" : ""}${x.toFixed(1)}%</span>`;
+}
+const videoLink = c =>
+  `<a href="https://www.youtube.com/watch?v=${esc(c.video_id)}" target="_blank" rel="noopener">${esc(c.title)}</a>`;
+
+function stockCalls(sym) {
+  const mine = CALLS.filter(c => c.symbol === sym);
+  if (!mine.length) return "";
+  const [h1, h2] = ALL.track.horizons;
+  return `<div class="calls"><strong>Calls on ${esc(sym)}</strong> <span class="name">(all stored videos)</span><ul>` +
+    mine.map(c => `<li>${esc(c.published)} · <span class="${callClass(c.call)}">${c.call}</span> — ${esc(c.channel)} ·
+      ${c.entry === null ? "no price yet" : `entry ${c.entry} · since call ${moveCell(c, c.now)} · ${h1}d ${horizonCell(c, h1)} ·
+      ${h2}d ${horizonCell(c, h2)}`} · ${videoLink(c)}</li>`).join("") + `</ul></div>`;
+}
+
+function drawLog() {
+  const card = document.getElementById("logcard");
+  if (!CALLS.length) { card.remove(); return; }
+  const el = document.getElementById("logtbl"), lq = document.getElementById("lq");
+  const lch = document.getElementById("lch"), lcall = document.getElementById("lcall");
+  const [h1, h2] = ALL.track.horizons;
+  const channels = [...new Set(CALLS.map(c => c.channel))].sort();
+  lch.innerHTML = `<option value="">All channels</option>` + channels.map(n => `<option>${esc(n)}</option>`).join("");
+  let showAll = false;
+  function render() {
+    const text = lq.value.trim().toUpperCase();
+    const shown = CALLS.filter(c => (!text || c.symbol.includes(text)) && (!lch.value || c.channel === lch.value) &&
+                                    (!lcall.value || c.call === lcall.value));
+    const page = showAll ? shown : shown.slice(0, LOG_PAGE);
+    el.querySelector("tbody").innerHTML = page.map(c => `<tr>
+        <td>${esc(c.published)}</td><td class="sym">${esc(c.symbol)}</td>
+        <td><span class="badge ${c.call.toUpperCase()}">${c.call.toUpperCase()}</span></td><td>${esc(c.channel)}</td>
+        <td class="num">${c.entry === null ? `<span class="name">–</span>` : `${c.entry} <span class="name">${esc(c.entry_date)}</span>`}</td>
+        <td class="num">${moveCell(c, c.now)}</td><td class="num">${horizonCell(c, h1)}</td>
+        <td class="num">${horizonCell(c, h2)}</td><td class="num">${vsMarket(c)}</td>
+        <td class="vid">${videoLink(c)}</td></tr>`).join("") +
+      (shown.length > page.length ? `<tr><td colspan="10"><button type="button" class="link" id="lmore">Show all
+        ${shown.length} calls</button></td></tr>` : "") ||
+      `<tr><td colspan="10">No calls match these filters.</td></tr>`;
+    const n = {buy: 0, sell: 0, hold: 0};
+    shown.forEach(c => n[c.call]++);
+    document.getElementById("lcount").textContent =
+      `${shown.length} of ${CALLS.length} calls · ${n.buy} buy, ${n.sell} sell, ${n.hold} hold`;
+  }
+  el.querySelector("tbody").addEventListener("click", e => { if (e.target.id === "lmore") { showAll = true; render(); } });
+  [lq, lch, lcall].forEach(x => x.addEventListener("input", () => { showAll = false; render(); }));
+  document.getElementById("lreset").addEventListener("click", () => {
+    lq.value = ""; lch.value = ""; lcall.value = ""; showAll = false; render();
+  });
+  render();
+}
+
 // Channel track record: all stored calls, so it doesn't follow the period switch.
 function drawTrack() {
   const T = ALL.track, el = document.getElementById("tracktbl");
-  if (!T || !T.channels.length || !T.calls.length) { document.getElementById("trackcard").remove(); return; }
+  if (!T || !T.channels.length || !T.channels[0].calls) { document.getElementById("trackcard").remove(); return; }
   const [h1, h2] = T.horizons, open = new Set();
   const pct = (v, signed = true) => v === null || v === undefined ? "–" : `${signed && v > 0 ? "+" : ""}${v.toFixed(1)}%`;
   const rate = (hit, n) => hit === null ? "–" : `${hit}% <span class="name">of ${n}</span>`;
   const tone = v => v === null || v === undefined ? "" : v > 0 ? "pos" : v < 0 ? "neg" : "";
   function calls(channel) {
-    const mine = T.calls.filter(c => channel === "All channels" || c.channel === channel);
+    const mine = T.calls.filter(c => c.call !== "hold" && c.entry !== null &&
+                                     (channel === "All channels" || c.channel === channel));
     const res = (c, h) => c["move" + h] === null ? `<span class="name">pending</span>`
       : `<span class="${c["right" + h] ? "pos" : "neg"}">${pct(c["move" + h])}</span>`;
     return `<ul>${mine.map(c => `<li>${esc(c.published)} · <strong>${esc(c.symbol)}</strong>
@@ -510,7 +611,7 @@ function stockFilter(s) {
 }
 const renderStocks = table({
   id: "tbl", rows: () => DATA.stocks, key: "symbol", empty: "No stocks match these filters in this period.",
-  filter: stockFilter, note: s => esc(s.summary) + signalChips(s.symbol), extra: tradingView,
+  filter: stockFilter, note: s => esc(s.summary) + signalChips(s.symbol), extra: s => tradingView(s) + stockCalls(s.symbol),
   onRender: (shown, all) => { document.getElementById("count").textContent = `Showing ${shown} of ${all} stocks`; },
   cells: s => `<td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
     <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
@@ -547,6 +648,7 @@ periodBox.addEventListener("click", e => { const b = e.target.closest("button");
 const fromLink = Number(location.hash.slice(1));
 setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
 drawTrack();
+drawLog();
 </script>
 </body>
 </html>
