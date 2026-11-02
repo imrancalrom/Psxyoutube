@@ -182,6 +182,10 @@ Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
    cleaned first: Yahoo's PSX history switches between split-adjusted and unadjusted prices and has short glitches,
    so moves beyond PSX's daily limit (10%, or Rs 1) are dropped as glitches or, if lasting, only the data after them
    is kept. The scores are only as good as the keyword call detection, and past results don't predict future ones.
+   The **call log** on the dashboard lists every explicit call (buy, sell and hold, including stocks without prices),
+   newest first, with the entry close, the move since the call to the latest close, the 5- and 20-day moves and the
+   20-day result vs the market, and a link to the video; filter it by stock, channel or call. An opened stock shows
+   its own calls the same way.
 6. **Dashboard** (`report.html`, one self-contained file: no internet needed, so it also opens offline, from a
    download or inside app file previews): leaderboard tiles (including tone improving / worsening most), trend chart for the top 5 (daily up to 31 days, weekly for longer periods), buzz by sector,
    a sortable sectors table and a sortable/filterable stocks table; click a row to see the videos behind it.

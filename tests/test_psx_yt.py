@@ -414,7 +414,8 @@ class TrackTests(unittest.TestCase):
         conn.executemany("INSERT INTO prices VALUES (?,?,?,?)",
                          [("OGDC", d, 100.0 + i, None) for i, d in enumerate(days)] +
                          [("PSO", d, 200.0 - i, None) for i, d in enumerate(days)])
-        for vid, title, day in (("a", "Buy OGDC", days[0]), ("b", "Sell PSO", days[0]), ("c", "Buy PSO", days[30])):
+        for vid, title, day in (("a", "Buy OGDC", days[0]), ("b", "Sell PSO", days[0]), ("c", "Buy PSO", days[30]),
+                                ("d", "Hold OGDC", days[5]), ("e", "Buy HUBC", days[5])):
             db.upsert_video(conn, {"id": vid, "channel_id": "UC1", "title": title, "published_at": day + "T18:00:00Z"})
         conn.commit()
         with contextlib.redirect_stdout(io.StringIO()):
@@ -432,6 +433,12 @@ class TrackTests(unittest.TestCase):
         self.assertEqual(everyone["hit20"], 100)
         # Market over OGDC's 20 days = mean of +19.8% and -10.4%; the buy beat it.
         self.assertGreater(ogdc["move20"], ogdc["market20"])
+        # The call log also lists hold calls and calls on stocks without prices; neither is scored.
+        self.assertEqual(ogdc["now"], round(100 * (139 / 101 - 1), 2))  # entry to the latest close
+        self.assertEqual((calls["d"]["call"], calls["d"]["right5"]), ("hold", None))
+        self.assertIsNotNone(calls["d"]["move5"])
+        self.assertEqual((calls["e"]["call"], calls["e"]["entry"], calls["e"]["now"]), ("buy", None, None))
+        self.assertEqual(len(t["calls"]), 5)
 
 
 class CaptionTests(unittest.TestCase):
