@@ -59,6 +59,19 @@ skipped. The variable keeps the list out of the code, but the dashboard and dige
 the `data` branch (and on GitHub Pages if you turn it on). Locally: `--watchlist FILE` or the `WATCHLIST`
 environment variable.
 
+### Shariah-compliant stocks only
+
+With a `shariah.txt` in the repository, the dashboard gets a **"Shariah-compliant only"** switch next to the channel
+picker, **on by default** (each viewer's choice is remembered in their browser). While it is on, the tiles, charts,
+stock table, call log and the sector table and chart cover only the listed stocks (sectors are then rebuilt from those
+stocks' videos, so a video that only names a sector doesn't count); the watchlist marks any stock that isn't listed.
+The digest and the channel track record still cover all stocks.
+
+The list is the constituents of the **PSX-KMI All Share Islamic Index**, which PSX recomposes twice a year (notices
+on psx.com.pk). `shariah.txt` holds the symbols (spaces, commas or new lines) plus two header lines the dashboard
+shows, e.g. `# source: PSX notice PSX/N-659, 29 May 2026` and `# as of: effective 5 June 2026`. Update it when a new
+recomposition notice comes out; without the file the switch is hidden. Locally: `--shariah FILE`.
+
 ### Dashboard at a fixed link (GitHub Pages)
 
 Each run can also publish the dashboard to **https://imrancalrom.github.io/Psxyoutube/**, one link to bookmark on your
@@ -179,7 +192,7 @@ made during its run).
 | `run` | fetch + analyze + top + report |
 | `demo [--videos 300]` | synthetic data to try the dashboard |
 
-Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`, `--watchlist watchlist.txt`.
+Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`, `--watchlist watchlist.txt`, `--shariah shariah.txt`.
 
 ## How it works
 

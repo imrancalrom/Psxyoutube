@@ -88,6 +88,9 @@ tr.row:hover { background: var(--bg); }
 #logtbl td.vid a { color: var(--accent); }
 .calls { margin: 0 0 10px; }
 .star { color: var(--hold); margin-right: 3px; }
+.halal { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); white-space: nowrap; }
+.halal:has(input:checked) { border-color: var(--bull); color: var(--bull); font-weight: 600; }
 #watchtbl tr.row td { vertical-align: top; }
 .chsel { position: relative; }
 .chsel summary { list-style: none; cursor: pointer; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
@@ -145,6 +148,7 @@ tr.row.note:hover { background: none; }
       <div class="chlist"><div class="chbtns"><button type="button" class="link" id="chall">All</button>
         <button type="button" class="link" id="chnone">None</button></div><div id="chboxes"></div></div>
     </details>
+    <label class="halal" id="halalbox"><input type="checkbox" id="halal"> Shariah-compliant only</label>
   </div>
   <div class="card section" id="watchcard">
     <h2>Your watchlist</h2>
@@ -274,6 +278,10 @@ const ALL = __DATA__;  // {periods: {"7": compute() output, ...}, default: 90}
 const PERIODS = Object.keys(ALL.periods).map(Number).sort((a, b) => a - b);
 let DATA = null;
 const WATCH = new Set((ALL.watchlist || []).map(w => w.symbol));  // stocks in watchlist.txt / $WATCHLIST
+// Shariah-compliant stocks (KMI All Share index, shariah.txt); HALAL = the "Shariah-compliant only" switch.
+const SHARIAH = ALL.shariah ? new Set(ALL.shariah.symbols) : null;
+let HALAL = false;
+let renderLog = () => {};
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -331,7 +339,8 @@ function drawLog() {
   let showAll = false;
   function render() {
     const text = lq.value.trim().toUpperCase();
-    const shown = CALLS.filter(c => (!text || c.symbol.includes(text)) && (!lch.value || c.channel === lch.value) &&
+    const shown = CALLS.filter(c => (!HALAL || SHARIAH.has(c.symbol)) &&
+                                    (!text || c.symbol.includes(text)) && (!lch.value || c.channel === lch.value) &&
                                     (!lcall.value || c.call === lcall.value));
     const page = showAll ? shown : shown.slice(0, LOG_PAGE);
     el.querySelector("tbody").innerHTML = page.map(c => `<tr>
@@ -347,13 +356,15 @@ function drawLog() {
     const n = {buy: 0, sell: 0, hold: 0};
     shown.forEach(c => n[c.call]++);
     document.getElementById("lcount").textContent =
-      `${shown.length} of ${CALLS.length} calls · ${n.buy} buy, ${n.sell} sell, ${n.hold} hold`;
+      `${shown.length} of ${CALLS.length} calls · ${n.buy} buy, ${n.sell} sell, ${n.hold} hold` +
+      (HALAL ? " · Shariah-compliant stocks only" : "");
   }
   el.querySelector("tbody").addEventListener("click", e => { if (e.target.id === "lmore") { showAll = true; render(); } });
   [lq, lch, lcall].forEach(x => x.addEventListener("input", () => { showAll = false; render(); }));
   document.getElementById("lreset").addEventListener("click", () => {
     lq.value = ""; lch.value = ""; lcall.value = ""; showAll = false; render();
   });
+  renderLog = render;
   render();
 }
 
@@ -401,7 +412,8 @@ function drawHeader() {
   document.getElementById("sub").textContent = `Last ${DATA.days} days: ${DATA.start} to ${DATA.end} · ` +
     `${DATA.channel_count} channel${DATA.channel_count === 1 ? "" : "s"} · ${DATA.video_count} videos · ` +
     `generated ${DATA.generated}` + captionNote() +
-    (CHANS ? ` · filtered to ${CHANS.size} of ${CHANNELS.length} channels` : "");
+    (CHANS ? ` · filtered to ${CHANS.size} of ${CHANNELS.length} channels` : "") +
+    (HALAL ? ` · Shariah-compliant stocks only (KMI All Share${ALL.shariah.as_of ? ", " + ALL.shariah.as_of : ""})` : "");
 }
 
 // Most buy/sell calls are spoken, so say how much of the archive has had its captions read.
@@ -692,6 +704,7 @@ const CHANNELS = Object.keys(LONGEST.channel_videos || {}).sort((a, b) => a.loca
 let CHANS = null;  // null = every channel
 const round2 = x => Math.round(x * 100) / 100;
 const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 864e5);
+const chanOk = c => !CHANS || CHANS.has(c);
 function trendLabel(recent, previous) {
   if (!recent && !previous) return "QUIET";
   if (!previous) return "NEW";
@@ -732,7 +745,7 @@ function aggregate(items, longest, keyName, d) {
   const longBy = new Map(longest.map(x => [x[keyName], x]));
   const out = [];
   for (const it of items) {
-    const refs = it.v.filter(r => CHANS.has(ALL.videos[r[0]][1]));
+    const refs = it.v.filter(r => chanOk(ALL.videos[r[0]][1]));
     if (!refs.length) continue;
     const a = {...it, v: refs, videos: refs.length, views: 0, buzz: 0, bullish: 0, bearish: 0, neutral: 0,
                buy_calls: 0, sell_calls: 0, hold: 0};
@@ -758,7 +771,7 @@ function aggregate(items, longest, keyName, d) {
     const w = [0, 0, 0, 0], long = longBy.get(it[keyName]);  // recent, previous, net tone recent, net tone previous
     for (const [id, , tone] of long ? long.v : []) {
       const [, channel, published] = ALL.videos[id];
-      if (!CHANS.has(channel)) continue;
+      if (!chanOk(channel)) continue;
       const age = dayDiff(d.end, published);
       if (age >= 0 && age < 2 * d.window) { const k = age < d.window ? 0 : 1; w[k]++; w[k + 2] += Math.sign(tone); }
     }
@@ -775,15 +788,56 @@ function aggregate(items, longest, keyName, d) {
   }
   return out.sort((x, y) => y.buzz - x.buzz);
 }
+// Sector rows built from their stocks' videos alone (used with the Shariah switch, so a sector only counts its
+// compliant stocks); a video naming several of a sector's stocks counts once, its calls netted like trends.py does.
+function sectorsFrom(stocks) {
+  const by = new Map();
+  for (const s of stocks) {
+    let sec = by.get(s.sector);
+    if (!sec) by.set(s.sector, sec = new Map());
+    for (const [id, call, tone, inTitle] of s.v) {
+      const m = sec.get(id) || {net: 0, hold: 0, tone: 0, title: 0};
+      m.net += call === "buy" ? 1 : call === "sell" ? -1 : 0;
+      m.hold += call === "hold" ? 1 : 0;
+      m.tone += tone;
+      m.title = m.title || inTitle;
+      sec.set(id, m);
+    }
+  }
+  return [...by].map(([sector, vids]) => ({sector, direct_videos: 0, stocks: [],
+    v: [...vids].sort((a, b) => ALL.videos[b[0]][2].localeCompare(ALL.videos[a[0]][2])).map(([id, m]) =>
+      [id, m.net > 0 ? "buy" : m.net < 0 ? "sell" : m.hold ? "hold" : "", Math.sign(m.tone), m.title ? 1 : 0, 0])}));
+}
+// The period's data narrowed by the channel picker and/or the Shariah switch.
 function derive(d) {
-  const stocks = aggregate(d.stocks, LONGEST.stocks, "symbol", d);
-  const sectors = aggregate(d.sectors, LONGEST.sectors, "sector", d);
+  const keep = s => !HALAL || SHARIAH.has(s.symbol);
+  const base = d.stocks.filter(keep), baseLong = LONGEST.stocks.filter(keep);
+  const stocks = CHANS ? aggregate(base, baseLong, "symbol", d) : base;
+  const sectors = HALAL ? aggregate(sectorsFrom(base), sectorsFrom(baseLong), "sector", d)
+    : CHANS ? aggregate(d.sectors, LONGEST.sectors, "sector", d) : d.sectors;
   for (const sec of sectors) {
     sec.stocks = stocks.filter(s => s.sector === sec.sector).sort((a, b) => b.videos - a.videos).slice(0, 8).map(s => s.symbol);
   }
   const counts = d.channel_videos || {};
-  return {...d, stocks, sectors, channel_count: CHANS.size,
-          video_count: [...CHANS].reduce((n, c) => n + (counts[c] || 0), 0)};
+  return {...d, stocks, sectors, channel_count: CHANS ? CHANS.size : d.channel_count,
+          video_count: CHANS ? [...CHANS].reduce((n, c) => n + (counts[c] || 0), 0) : d.video_count};
+}
+function setupHalal() {
+  const box = document.getElementById("halalbox"), cb = document.getElementById("halal");
+  if (!SHARIAH) { box.remove(); return; }
+  const sh = ALL.shariah;
+  box.title = `${SHARIAH.size} stocks in the PSX-KMI All Share Islamic Index` + (sh.as_of ? ` (${sh.as_of})` : "") +
+    (sh.source ? `, source: ${sh.source}` : "") + ". Applies to the tiles, charts, tables, watchlist and call log; " +
+    "the digest and channel track record cover all stocks.";
+  let saved = null;
+  try { saved = localStorage.getItem("psx-shariah"); } catch (e) { /* storage blocked: use the default */ }
+  cb.checked = saved === null ? true : saved === "1";  // on unless this viewer switched it off
+  HALAL = cb.checked;
+  cb.addEventListener("change", () => {
+    HALAL = cb.checked;
+    try { localStorage.setItem("psx-shariah", HALAL ? "1" : "0"); } catch (e) { /* not remembered */ }
+    setPeriod(DAYS); renderLog();
+  });
 }
 function drawChannelPicker() {
   const box = document.getElementById("chboxes"), sel = document.getElementById("chsel");
@@ -808,6 +862,7 @@ function drawChannelPicker() {
 // Watchlist: the stocks listed in watchlist.txt / $WATCHLIST, first on the page; follows the period and channels.
 function drawWatch() {
   const card = document.getElementById("watchcard");
+  if (!card) return;  // removed on the first draw when there is no watchlist
   if (!WATCH.size) { card.remove(); return; }
   const by = new Map(DATA.stocks.map(s => [s.symbol, s]));
   card.querySelector("tbody").innerHTML = ALL.watchlist.map(w => {
@@ -815,7 +870,8 @@ function drawWatch() {
     const price = t ? `${t.close.toLocaleString(undefined, {maximumFractionDigits: 2})}
       <span class="${t.change_pct > 0 ? "pos" : t.change_pct < 0 ? "neg" : "name"}">${t.change_pct > 0 ? "+" : ""}${t.change_pct.toFixed(1)}%</span>
       <div class="name">${esc(t.date)}</div>` : `<span class="name">–</span>`;
-    const head = `<td><div class="sym">${esc(w.symbol)}</div><div class="name">${esc(w.name)}</div></td>`;
+    const off = SHARIAH && !SHARIAH.has(w.symbol) ? ` <span class="chip" title="Not in the KMI All Share Islamic Index list">not Shariah-compliant</span>` : "";
+    const head = `<td><div class="sym">${esc(w.symbol)}${off}</div><div class="name">${esc(w.name)}</div></td>`;
     const body = s ? `<td class="num">${s.videos}</td><td class="num">${s.recent} <span class="name">(${s.previous})</span></td>
         <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${tone(s)}</td><td>${callCell(s)}</td>`
       : `<td class="num">0</td><td colspan="4" class="name">No videos in this period${CHANS ? " from these channels" : ""}</td>`;
@@ -834,7 +890,7 @@ periodBox.innerHTML = PERIODS.map(d => `<button type="button" data-d="${d}">${d}
 let DAYS = ALL.default;
 function setPeriod(d) {
   DAYS = d;
-  DATA = CHANS ? derive(ALL.periods[d]) : ALL.periods[d];
+  DATA = CHANS || HALAL ? derive(ALL.periods[d]) : ALL.periods[d];
   periodBox.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.d) === d)));
   drawHeader(); drawWatch(); drawTiles(); drawCharts(); fillSectors(); renderStocks(); renderSectors();
   try { history.replaceState(null, "", "#" + d); } catch (e) { /* e.g. inside a sandboxed preview */ }
@@ -842,6 +898,7 @@ function setPeriod(d) {
 periodBox.addEventListener("click", e => { const b = e.target.closest("button"); if (b) setPeriod(Number(b.dataset.d)); });
 const fromLink = Number(location.hash.slice(1));
 drawChannelPicker();
+setupHalal();
 setPeriod(PERIODS.includes(fromLink) ? fromLink : ALL.default);
 drawTrack();
 drawLog();
@@ -853,7 +910,7 @@ drawLog();
 
 def write_report(periods: dict[int, dict], path: str | Path, default: int, tech: dict | None = None,
                  digest: dict | None = None, track: dict | None = None, captions: dict | None = None,
-                 watchlist: list[dict] | None = None) -> Path:
+                 watchlist: list[dict] | None = None, shariah: dict | None = None) -> Path:
     """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`.
     `tech` maps symbols to prices.technicals() output for the price charts."""
     # Each video's details are stored once; stocks and sectors in every period refer to them by id.
@@ -869,7 +926,7 @@ def write_report(periods: dict[int, dict], path: str | Path, default: int, tech:
     data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
                                  "sectors": [compact(x) for x in p["sectors"]]} for d, p in periods.items()},
             "default": default, "videos": videos, "tech": tech or {}, "digest": digest, "track": track,
-            "captions": captions, "watchlist": watchlist or []}
+            "captions": captions, "watchlist": watchlist or [], "shariah": shariah}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     path = Path(path)
     path.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")

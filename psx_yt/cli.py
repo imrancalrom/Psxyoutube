@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import db, digest, notify, prices, track, watchlist, youtube
+from . import db, digest, notify, prices, shariah, track, watchlist, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                        strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
@@ -223,7 +223,8 @@ def cmd_report(args, conn):
     watch = [{"symbol": s, "name": stocks[s].name, "sector": stocks[s].sector} for s in watched(args)]
     path = write_report(periods, args.output, default=args.days, tech=tech,
                         digest=digest.build(conn, stocks, watchlist=watched(args)), watchlist=watch,
-                        track=track.build(conn), captions=db.caption_stats(conn))
+                        track=track.build(conn), captions=db.caption_stats(conn),
+                        shariah=shariah.load(getattr(args, "shariah", None)))
     data = periods[args.days]
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors "
           f"over {args.days} days; also {', '.join(str(d) for d in periods if d != args.days)}-day views)")
@@ -421,6 +422,8 @@ def main(argv=None):
     p.add_argument("--tickers", default="tickers_extra.csv", help="CSV of extra/override tickers")
     p.add_argument("--watchlist", default="watchlist.txt",
                    help="Stocks you follow, put first in the dashboard and digest (also $WATCHLIST)")
+    p.add_argument("--shariah", default="shariah.txt",
+                   help="Shariah-compliant stocks (KMI All Share index) for the dashboard's filter")
     p.add_argument("--api-key", default=os.environ.get("YOUTUBE_API_KEY"),
                    help="YouTube Data API v3 key (default: $YOUTUBE_API_KEY); without it RSS feeds are used")
     sub = p.add_subparsers(dest="cmd", required=True)

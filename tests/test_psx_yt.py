@@ -9,7 +9,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
-from psx_yt import cli, db, digest, notify, prices, track, watchlist, youtube
+from psx_yt import cli, db, digest, notify, prices, shariah, track, watchlist, youtube
 from psx_yt.analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                              strip_payment_details, strip_video_titles, title_key)
 from psx_yt.tickers import load_tickers
@@ -416,6 +416,32 @@ class DigestTests(unittest.TestCase):
             "LUCK: no videos in the last two weeks"])
         self.assertEqual(w["sections"][1:], d["sections"])
         self.assertTrue(all(isinstance(sec["items"], list) for sec in w["sections"]))
+
+
+class ShariahTests(unittest.TestCase):
+    def test_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shariah.txt")
+            self.assertIsNone(shariah.load(path))  # no file: the dashboard hides the switch
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("# Source: PSX notice N-000\n# As of: 5 June 2026\nogdc PPL\nmebl  # bank\n")
+            self.assertEqual(shariah.load(path), {"symbols": ["OGDC", "PPL", "MEBL"], "source": "PSX notice N-000",
+                                                  "as_of": "5 June 2026"})
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("# only comments\n")
+            self.assertIsNone(shariah.load(path))
+
+    def test_report_embeds_the_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dbf, out, sh = (os.path.join(tmp, n) for n in ("t.db", "r.html", "shariah.txt"))
+            with open(sh, "w", encoding="utf-8") as f:
+                f.write("OGDC\n")
+            db.connect(dbf).close()
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["--db", dbf, "--shariah", sh, "report", "-o", out])
+            html = open(out, encoding="utf-8").read()
+        data, _ = json.JSONDecoder().raw_decode(html.split("const ALL = ", 1)[1])
+        self.assertEqual(data["shariah"]["symbols"], ["OGDC"])
 
 
 class WatchlistTests(unittest.TestCase):
