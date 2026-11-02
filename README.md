@@ -40,6 +40,26 @@ the run summary, and the report and CSVs can be downloaded from the run's artifa
 "Retry videos earlier marked as having no captions". To work with the data locally:
 `git fetch origin data && git show origin/data:psx_yt.db > psx_yt.db`.
 
+### Daily digest on Telegram
+
+After each daily run the digest (new videos and calls, buzz rising and fading, sector shifts, technical signals) can
+be sent to Telegram, with a link to the run where the dashboard can be downloaded. Setup, about five minutes:
+
+1. In Telegram, open **@BotFather**, send `/newbot` and pick a name. It replies with a **token** like
+   `123456:ABC...`. Keep it private: anyone with it can post as your bot.
+2. Open your new bot (BotFather links it) and press **Start** or send it any message. For a group or channel instead,
+   add the bot there (as an admin for a channel) and post a message.
+3. In GitHub: Settings → Secrets and variables → Actions → **New repository secret**: name `TELEGRAM_BOT_TOKEN`,
+   value the token.
+4. Actions tab → "Daily PSX YouTube run" → Run workflow, tick **"Print the chat ids that messaged your Telegram
+   bot"**. In the run log, the "Find Telegram chat id" step prints lines like `Chat id 123456789 (private: Imran)`.
+5. Add a second secret `TELEGRAM_CHAT_ID` with that number (several chats: comma-separated, e.g.
+   `123456789,-1001234567890`).
+
+From the next run on the digest arrives every evening after 21:17 PKT. If sending fails, the run log says why
+(wrong token, wrong chat id, bot not started) without showing the token, and the data is still saved. Locally:
+`python -m psx_yt notify --dry-run` prints the message without sending it.
+
 ### Getting more data
 
 | Mode | Setup | What you get |
@@ -126,6 +146,7 @@ made during its run).
 | `report [--days 90] [-o report.html]` | write the HTML dashboard |
 | `export [--days 90] [--sectors] [-o psx_buzz.csv]` | save the stock (or sector) leaderboard as CSV (opens in Excel), or everything as `.json` |
 | `digest [-o digest.md]` | short "what changed" note: last 24 hours, this week vs last week, sector shifts |
+| `notify [--dry-run] [--link URL] [--find-chat]` | send the digest to Telegram (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`), or list the chats that messaged the bot |
 | `run` | fetch + analyze + top + report |
 | `demo [--videos 300]` | synthetic data to try the dashboard |
 
