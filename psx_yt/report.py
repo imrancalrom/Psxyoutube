@@ -87,6 +87,8 @@ tr.row:hover { background: var(--bg); }
 #logtbl td.vid { white-space: normal; min-width: 240px; max-width: 420px; }
 #logtbl td.vid a { color: var(--accent); }
 .calls { margin: 0 0 10px; }
+.star { color: var(--hold); margin-right: 3px; }
+#watchtbl tr.row td { vertical-align: top; }
 .chsel { position: relative; }
 .chsel summary { list-style: none; cursor: pointer; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); font-size: 13px; white-space: nowrap; }
@@ -143,6 +145,21 @@ tr.row.note:hover { background: none; }
       <div class="chlist"><div class="chbtns"><button type="button" class="link" id="chall">All</button>
         <button type="button" class="link" id="chnone">None</button></div><div id="chboxes"></div></div>
     </details>
+  </div>
+  <div class="card section" id="watchcard">
+    <h2>Your watchlist</h2>
+    <div class="tablewrap"><table id="watchtbl">
+      <thead><tr>
+        <th>Stock</th><th class="num" title="Videos in the selected period">Videos</th>
+        <th class="num" title="Videos in the last 7 days (and the 7 days before)">7d (prev)</th><th>Trend</th>
+        <th title="Net tone, previous 7 days to last 7 days">Tone 7d</th><th>YouTube call</th>
+        <th class="num" title="Latest daily close and its change on the day before (Yahoo Finance)">Last close</th>
+        <th>Signals</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="foot">The stocks in watchlist.txt / the WATCHLIST variable, for the selected period and channels. Click one to
+      find it in the table below.</div>
   </div>
   <div class="tiles" id="tiles"></div>
   <div class="grid">
@@ -228,6 +245,9 @@ tr.row.note:hover { background: none; }
         <option value="1">1+ videos</option><option value="2">2+ videos</option><option value="3">3+ videos</option>
         <option value="5">5+ videos</option><option value="10">10+ videos</option>
       </select>
+      <select id="fwatch" aria-label="Watchlist">
+        <option value="">All stocks</option><option value="1">Watchlist only</option>
+      </select>
       <button type="button" id="freset" class="link">Reset</button>
       <span class="name" id="count"></span>
     </div>
@@ -253,6 +273,7 @@ tr.row.note:hover { background: none; }
 const ALL = __DATA__;  // {periods: {"7": compute() output, ...}, default: 90}
 const PERIODS = Object.keys(ALL.periods).map(Number).sort((a, b) => a - b);
 let DATA = null;
+const WATCH = new Set((ALL.watchlist || []).map(w => w.symbol));  // stocks in watchlist.txt / $WATCHLIST
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -622,6 +643,8 @@ function loadCharts(root) {
 
 const q = document.getElementById("q"), fsec = document.getElementById("fsec");
 const fcall = document.getElementById("fcall"), fmin = document.getElementById("fmin"), fsig = document.getElementById("fsig");
+const fwatch = document.getElementById("fwatch");
+if (!WATCH.size) fwatch.remove();
 // Technical signals from daily closes (support/resistance, RSI, crosses, 52-week range).
 const signalsOf = sym => (ALL.tech[sym] && ALL.tech[sym].signals) || [];
 const signalChips = sym => signalsOf(sym).map(g => ` <span class="chip" title="${esc(g.detail)}">${esc(g.label)}</span>`).join("");
@@ -632,20 +655,21 @@ function stockFilter(s) {
   if (fcall.value === "any" ? s.call === "-" : fcall.value && s.call !== fcall.value) return false;
   const kinds = signalsOf(s.symbol).map(g => g.kind);
   if (fsig.value === "any" ? !kinds.length : fsig.value && !kinds.includes(fsig.value)) return false;
+  if (fwatch.value && !WATCH.has(s.symbol)) return false;
   return s.videos >= Number(fmin.value);
 }
 const renderStocks = table({
   id: "tbl", rows: () => DATA.stocks, key: "symbol", empty: "No stocks match these filters in this period.",
   filter: stockFilter, note: s => esc(s.summary) + signalChips(s.symbol), extra: s => tradingView(s) + stockCalls(s.symbol),
   onRender: (shown, all) => { document.getElementById("count").textContent = `Showing ${shown} of ${all} stocks`; },
-  cells: s => `<td><div class="sym">${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
+  cells: s => `<td><div class="sym">${WATCH.has(s.symbol) ? `<span class="star" title="On your watchlist">★</span>` : ""}${esc(s.symbol)}</div><div class="name">${esc(s.name)}</div></td>
     <td>${esc(s.sector)}</td><td class="num">${s.buzz}</td><td class="num">${s.videos}</td>
     <td class="num">${s.channel_count}</td><td class="num">${s.recent} <span class="name">(${s.previous})</span></td>
     <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${sbar(s)}</td><td>${tone(s)}</td><td>${callCell(s)}</td><td class="num">${fmt(s.views)}</td>`,
 });
-[q, fsec, fcall, fsig, fmin].forEach(el => el.addEventListener("input", renderStocks));
+[q, fsec, fcall, fsig, fmin, fwatch].forEach(el => el.addEventListener("input", renderStocks));
 document.getElementById("freset").addEventListener("click", () => {
-  q.value = ""; fsec.value = ""; fcall.value = ""; fsig.value = ""; fmin.value = "1"; renderStocks();
+  q.value = ""; fsec.value = ""; fcall.value = ""; fsig.value = ""; fmin.value = "1"; fwatch.value = ""; renderStocks();
 });
 const renderSectors = table({
   id: "sectbl", rows: () => DATA.sectors, key: "sector", empty: "No sectors discussed in this period.",
@@ -781,6 +805,30 @@ function drawChannelPicker() {
   document.addEventListener("click", e => { if (!sel.contains(e.target)) sel.removeAttribute("open"); });
 }
 
+// Watchlist: the stocks listed in watchlist.txt / $WATCHLIST, first on the page; follows the period and channels.
+function drawWatch() {
+  const card = document.getElementById("watchcard");
+  if (!WATCH.size) { card.remove(); return; }
+  const by = new Map(DATA.stocks.map(s => [s.symbol, s]));
+  card.querySelector("tbody").innerHTML = ALL.watchlist.map(w => {
+    const s = by.get(w.symbol), t = ALL.tech[w.symbol];
+    const price = t ? `${t.close.toLocaleString(undefined, {maximumFractionDigits: 2})}
+      <span class="${t.change_pct > 0 ? "pos" : t.change_pct < 0 ? "neg" : "name"}">${t.change_pct > 0 ? "+" : ""}${t.change_pct.toFixed(1)}%</span>
+      <div class="name">${esc(t.date)}</div>` : `<span class="name">–</span>`;
+    const head = `<td><div class="sym">${esc(w.symbol)}</div><div class="name">${esc(w.name)}</div></td>`;
+    const body = s ? `<td class="num">${s.videos}</td><td class="num">${s.recent} <span class="name">(${s.previous})</span></td>
+        <td><span class="badge ${s.trend}">${s.trend}</span></td><td>${tone(s)}</td><td>${callCell(s)}</td>`
+      : `<td class="num">0</td><td colspan="4" class="name">No videos in this period${CHANS ? " from these channels" : ""}</td>`;
+    return `<tr class="row" data-s="${esc(w.symbol)}">${head}${body}<td class="num">${price}</td>
+      <td>${signalChips(w.symbol) || `<span class="name">–</span>`}</td></tr>`;
+  }).join("");
+}
+document.getElementById("watchtbl").addEventListener("click", e => {
+  const tr = e.target.closest("tr.row"); if (!tr) return;
+  q.value = tr.dataset.s; fwatch.value = ""; renderStocks();
+  document.getElementById("tbl").scrollIntoView({behavior: "smooth", block: "start"});
+});
+
 const periodBox = document.getElementById("periods");
 periodBox.innerHTML = PERIODS.map(d => `<button type="button" data-d="${d}">${d} days</button>`).join("");
 let DAYS = ALL.default;
@@ -788,7 +836,7 @@ function setPeriod(d) {
   DAYS = d;
   DATA = CHANS ? derive(ALL.periods[d]) : ALL.periods[d];
   periodBox.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.d) === d)));
-  drawHeader(); drawTiles(); drawCharts(); fillSectors(); renderStocks(); renderSectors();
+  drawHeader(); drawWatch(); drawTiles(); drawCharts(); fillSectors(); renderStocks(); renderSectors();
   try { history.replaceState(null, "", "#" + d); } catch (e) { /* e.g. inside a sandboxed preview */ }
 }
 periodBox.addEventListener("click", e => { const b = e.target.closest("button"); if (b) setPeriod(Number(b.dataset.d)); });
@@ -804,7 +852,8 @@ drawLog();
 
 
 def write_report(periods: dict[int, dict], path: str | Path, default: int, tech: dict | None = None,
-                 digest: dict | None = None, track: dict | None = None, captions: dict | None = None) -> Path:
+                 digest: dict | None = None, track: dict | None = None, captions: dict | None = None,
+                 watchlist: list[dict] | None = None) -> Path:
     """Dashboard with one dataset per look-back period (days -> compute() output), opening on `default`.
     `tech` maps symbols to prices.technicals() output for the price charts."""
     # Each video's details are stored once; stocks and sectors in every period refer to them by id.
@@ -820,7 +869,7 @@ def write_report(periods: dict[int, dict], path: str | Path, default: int, tech:
     data = {"periods": {str(d): {**p, "stocks": [compact(x) for x in p["stocks"]],
                                  "sectors": [compact(x) for x in p["sectors"]]} for d, p in periods.items()},
             "default": default, "videos": videos, "tech": tech or {}, "digest": digest, "track": track,
-            "captions": captions}
+            "captions": captions, "watchlist": watchlist or []}
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     path = Path(path)
     path.write_text(TEMPLATE.replace("__DATA__", payload), encoding="utf-8")

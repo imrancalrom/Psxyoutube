@@ -40,6 +40,25 @@ the run summary, and the report and CSVs can be downloaded from the run's artifa
 "Retry videos earlier marked as having no captions". To work with the data locally:
 `git fetch origin data && git show origin/data:psx_yt.db > psx_yt.db`.
 
+### Watchlist
+
+List the stocks you hold or follow, and they come first everywhere:
+
+- **Dashboard**: a "Your watchlist" card at the top (videos, 7-day trend, tone, YouTube call, last close and
+  technical signals for each, following the period and channel picker; click one to find it in the table), a ★ next
+  to them in the stock table, and a "Watchlist only" filter.
+- **Digest and Telegram message**: a first section with one line per stock, e.g.
+  `OGDC: 1 video this week (0 the week before) · last close 306.78 (+2.9% in 5 trading days) · Near resistance: ...`,
+  even on days nothing happened to it.
+- Watched stocks get daily prices even when no channel mentions them.
+
+Either commit a `watchlist.txt` (copy `watchlist.example.txt`: symbols separated by spaces, commas or new lines, `#`
+comments), or set a repository **variable** `WATCHLIST` (Settings → Secrets and variables → Actions → Variables →
+New repository variable), e.g. `OGDC PSO MEBL`. Both are merged; unknown symbols are reported in the run log and
+skipped. The variable keeps the list out of the code, but the dashboard and digest show it, and they are public on
+the `data` branch (and on GitHub Pages if you turn it on). Locally: `--watchlist FILE` or the `WATCHLIST`
+environment variable.
+
 ### Dashboard at a fixed link (GitHub Pages)
 
 Each run can also publish the dashboard to **https://imrancalrom.github.io/Psxyoutube/**, one link to bookmark on your
@@ -160,7 +179,7 @@ made during its run).
 | `run` | fetch + analyze + top + report |
 | `demo [--videos 300]` | synthetic data to try the dashboard |
 
-Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`.
+Global options: `--db FILE`, `--api-key KEY`, `--tickers extra.csv`, `--watchlist watchlist.txt`.
 
 ## How it works
 

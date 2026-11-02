@@ -13,8 +13,10 @@ from .trends import compute
 TOP = 5  # items per list, so the note stays a quick read
 
 
-def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: int = 7) -> dict:
-    """{"title", "headline", "sections": [{"title", "items": [str]}]}; empty sections are left out."""
+def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: int = 7,
+          watchlist: list[str] | None = None) -> dict:
+    """{"title", "headline", "sections": [{"title", "items": [str]}]}; empty sections are left out. Watched stocks
+    get the first section, one line each, even on a day nothing happened to them."""
     now = now or datetime.now(timezone.utc)
     today = now.date()
     data = compute(conn, stocks, days=90, window=window, today=today)
@@ -85,6 +87,26 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
         if listed:
             week.append(f"{label}: {listed}")
 
+    watch = []
+    for sym in watchlist or []:
+        st, bits = names.get(sym), []
+        if day_count.get(sym):
+            n = day_count[sym]
+            bits.append(f"{n} new video{'s' if n != 1 else ''} in the last 24 hours")
+        recent, previous = (st["recent"], st["previous"]) if st else (0, 0)
+        bits.append(f"{recent} video{'s' if recent != 1 else ''} this week ({previous} the week before)"
+                    if recent or previous else "no videos in the last two weeks")
+        c = calls.get(sym)
+        if c:
+            bits.append("calls this week: " + ", ".join(f"{c[k]} {k}" for k in ("buy", "sell", "hold") if c[k]))
+        t = prices.technicals(prices.load_series(conn, sym))
+        if t:
+            closes = t["chart"]["close"]
+            move = f" ({100 * (closes[-1] / closes[-6] - 1):+.1f}% in 5 trading days)" if len(closes) > 5 else ""
+            bits.append(f"last close {t['close']:,.2f}{move}")
+            bits += [f"{prices.SIGNAL_LABELS[g['kind']]}: {g['detail']}" for g in t.get("signals", [])]
+        watch.append(f"{sym}: " + " · ".join(bits))
+
     sectors = []
     for s in data["sectors"]:
         bits = []
@@ -122,7 +144,8 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
     if cap["waiting"]:
         headline += (f". Captions: {cap['read']} of {cap['total']} videos read, {cap['waiting']} waiting "
                      "(most calls are spoken; run captions.bat / captions.sh on a home computer)")
-    sections = [{"title": "Last 24 hours", "items": last24},
+    sections = [{"title": "Your watchlist", "items": watch},
+                {"title": "Last 24 hours", "items": last24},
                 {"title": "This week vs last week", "items": week or ["No changes worth noting"]},
                 {"title": "Sectors", "items": sectors[:TOP]},
                 {"title": "Technical signals (daily closes)", "items": technical}]

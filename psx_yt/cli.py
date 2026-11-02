@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import db, digest, notify, prices, track, youtube
+from . import db, digest, notify, prices, track, watchlist, youtube
 from .analyzer import (Analyzer, analyze_video, analyze_video_sectors, boilerplate_lines, strip_lines,
                        strip_payment_details, strip_video_titles, title_key)
 from .report import write_report
@@ -216,11 +216,13 @@ def cmd_report(args, conn):
     stocks = load_tickers(args.tickers)
     periods = {d: compute(conn, stocks, days=d) for d in sorted({*REPORT_PERIODS, args.days})}
     tech = {}
-    for sym in {x["symbol"] for p in periods.values() for x in p["stocks"]}:
+    for sym in {x["symbol"] for p in periods.values() for x in p["stocks"]} | set(watched(args)):
         t = prices.technicals(prices.load_series(conn, sym))
         if t:
             tech[sym] = t
-    path = write_report(periods, args.output, default=args.days, tech=tech, digest=digest.build(conn, stocks),
+    watch = [{"symbol": s, "name": stocks[s].name, "sector": stocks[s].sector} for s in watched(args)]
+    path = write_report(periods, args.output, default=args.days, tech=tech,
+                        digest=digest.build(conn, stocks, watchlist=watched(args)), watchlist=watch,
                         track=track.build(conn), captions=db.caption_stats(conn))
     data = periods[args.days]
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors "
@@ -258,6 +260,13 @@ def cmd_export(args, conn):
     print(f"Exported {what} to {args.output}")
 
 
+def watched(args) -> list[str]:
+    """The watchlist (watchlist.txt and $WATCHLIST), read once per command."""
+    if not hasattr(args, "_watched"):
+        args._watched = watchlist.load(getattr(args, "watchlist", None), load_tickers(getattr(args, "tickers", None)))
+    return args._watched
+
+
 def cmd_prices(args, conn):
     """Daily closes from Yahoo Finance (<symbol>.KA, checked to be the Karachi listing in PKR) for every stock mentioned
     in the look-back period, for the dashboard's price charts. Failures only skip that stock; after 5 in a row the
@@ -270,6 +279,7 @@ def cmd_prices(args, conn):
     symbols = [r[0] for r in conn.execute(
         """SELECT DISTINCT m.symbol FROM mentions m JOIN videos v ON v.id = m.video_id
            WHERE substr(v.published_at, 1, 10) >= ? ORDER BY m.symbol""", (since,))]
+    symbols += [s for s in watched(args) if s not in symbols]  # watched stocks get prices even when nobody mentions them
     print(f"Fetching daily prices for {len(symbols)} stocks from Yahoo Finance")
     ok = failed_in_a_row = 0
     for sym in symbols:
@@ -299,7 +309,7 @@ def cmd_prices(args, conn):
 
 
 def cmd_digest(args, conn):
-    text = digest.markdown(digest.build(conn, load_tickers(args.tickers)))
+    text = digest.markdown(digest.build(conn, load_tickers(args.tickers), watchlist=watched(args)))
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(text)
@@ -321,7 +331,7 @@ def cmd_notify(args, conn):
         for c in chats:
             print(f"Chat id {c['id']}  ({c['type']}: {c['name']})")
         return
-    text = notify.message(digest.build(conn, load_tickers(args.tickers)), link=args.link,
+    text = notify.message(digest.build(conn, load_tickers(args.tickers), watchlist=watched(args)), link=args.link,
                           link_text=args.link_text or notify.RUN_LINK_TEXT)
     chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if args.dry_run or not (token and chat):
@@ -409,6 +419,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="psx_yt", description="Track which PSX stocks YouTube channels are discussing.")
     p.add_argument("--db", default="psx_yt.db", help="SQLite database file (default: psx_yt.db)")
     p.add_argument("--tickers", default="tickers_extra.csv", help="CSV of extra/override tickers")
+    p.add_argument("--watchlist", default="watchlist.txt",
+                   help="Stocks you follow, put first in the dashboard and digest (also $WATCHLIST)")
     p.add_argument("--api-key", default=os.environ.get("YOUTUBE_API_KEY"),
                    help="YouTube Data API v3 key (default: $YOUTUBE_API_KEY); without it RSS feeds are used")
     sub = p.add_subparsers(dest="cmd", required=True)
