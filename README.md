@@ -40,6 +40,16 @@ the run summary, and the report and CSVs can be downloaded from the run's artifa
 "Retry videos earlier marked as having no captions". To work with the data locally:
 `git fetch origin data && git show origin/data:psx_yt.db > psx_yt.db`.
 
+### Dashboard at a fixed link (GitHub Pages)
+
+Each run can also publish the dashboard to **https://imrancalrom.github.io/Psxyoutube/**, one link to bookmark on your
+phone, refreshed after every daily run (the CSVs and digest sit next to it: `psx_buzz.csv`, `psx_sectors.csv`,
+`digest.md`). Turn it on once: repository **Settings → Pages → Build and deployment → Source: GitHub Actions**, then
+run the workflow (or wait for the next daily run). Until then the run leaves a notice and the dashboard is only in the
+run's artifacts. Once it is on, the Telegram digest links straight to the page.
+
+The page is public, like the repository and its `data` branch; it asks search engines not to index it.
+
 ### Daily digest on Telegram
 
 After each daily run the digest (new videos and calls, buzz rising and fading, sector shifts, technical signals) can

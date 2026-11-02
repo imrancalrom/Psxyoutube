@@ -450,6 +450,8 @@ class NotifyTests(unittest.TestCase):
         self.assertIn("<b>Sectors</b>\n• Oil &amp; Gas E&amp;P: buzz rising 2→3\n• &lt;b&gt;x&lt;/b&gt;", m)
         self.assertIn('href="https://github.com/o/r/actions/runs/1?a=1&amp;b=2"', m)
         self.assertIn("Not investment advice", m)
+        m = notify.message(self.D, link="https://o.github.io/r/", link_text="Open the dashboard")
+        self.assertIn('<a href="https://o.github.io/r/">Open the dashboard</a>', m)
 
     def test_split(self):
         self.assertEqual(notify.split("a\nb\nc", limit=3), ["a\nb", "c"])
