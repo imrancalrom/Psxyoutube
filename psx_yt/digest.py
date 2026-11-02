@@ -6,7 +6,7 @@ Everything is read from the stored data, so it needs no snapshot of the previous
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from . import prices
+from . import db, prices
 from .tickers import Stock
 from .trends import compute
 
@@ -118,6 +118,10 @@ def build(conn, stocks: dict[str, Stock], now: datetime | None = None, window: i
         "SELECT 1 FROM videos WHERE substr(published_at, 1, 10) >= ?", (start,)))
     headline = (f"{week_videos} videos this week across {data['channel_count']} channels"
                 + (f"; most discussed over 90 days: {most} ({names[most]['videos']} videos)" if most else ""))
+    cap = db.caption_stats(conn)
+    if cap["waiting"]:
+        headline += (f". Captions: {cap['read']} of {cap['total']} videos read, {cap['waiting']} waiting "
+                     "(most calls are spoken; run captions.bat / captions.sh on a home computer)")
     sections = [{"title": "Last 24 hours", "items": last24},
                 {"title": "This week vs last week", "items": week or ["No changes worth noting"]},
                 {"title": "Sectors", "items": sectors[:TOP]},

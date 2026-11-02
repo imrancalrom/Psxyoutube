@@ -486,8 +486,20 @@ class CaptionTests(unittest.TestCase):
             db.upsert_video(conn, {"id": f"v{i}", "channel_id": "UC1", "title": "t", "published_at": "2026-01-01T00:00:00Z"})
         calls = mock.Mock(return_value=(None, "blocked", "IpBlocked"))
         with mock.patch.object(youtube, "fetch_transcript", calls), contextlib.redirect_stdout(io.StringIO()):
-            cli.fetch_transcripts(conn)
+            counts = cli.fetch_transcripts(conn)
         self.assertEqual(calls.call_count, cli.MAX_FAILURES_IN_A_ROW)
+        self.assertTrue(counts["stopped"])
+        self.assertEqual(counts["blocked"], cli.MAX_FAILURES_IN_A_ROW)
+
+    def test_caption_stats(self):
+        conn = db.connect(":memory:")
+        db.upsert_channel(conn, "UC1", "Chan 1")
+        for i in range(4):
+            db.upsert_video(conn, {"id": f"v{i}", "channel_id": "UC1", "title": "t", "published_at": "2026-01-01T00:00:00Z"})
+        conn.execute("UPDATE videos SET transcript = 'words' WHERE id = 'v0'")
+        conn.execute("UPDATE videos SET transcript = '' WHERE id = 'v1'")
+        self.assertEqual(db.caption_stats(conn), {"total": 4, "read": 1, "none": 1, "waiting": 2})
+        self.assertEqual(db.caption_stats(db.connect(":memory:")), {"total": 0, "read": 0, "none": 0, "waiting": 0})
 
 
 class TrendTests(unittest.TestCase):

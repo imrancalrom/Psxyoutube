@@ -96,8 +96,11 @@ CAPTION_GRACE = timedelta(days=2)  # YouTube can take a while to auto-generate c
 MAX_FAILURES_IN_A_ROW = 5  # stop early when YouTube is blocking us rather than hammering it
 
 
-def fetch_transcripts(conn, retry: bool = False, limit: int | None = None):
+def fetch_transcripts(conn, retry: bool = False, limit: int | None = None) -> dict | None:
     """Download captions for videos that have none stored yet, newest first (at most `limit` of them).
+
+    Returns the counts per status plus "stopped" (True when it gave up after repeated blocks or errors), or None
+    when youtube-transcript-api is missing.
 
     A video is marked caption-less ("") only when YouTube says it has none and it is older than CAPTION_GRACE;
     blocks and errors leave it NULL so the next run tries again.
@@ -112,11 +115,12 @@ def fetch_transcripts(conn, retry: bool = False, limit: int | None = None):
     now = datetime.now(timezone.utc)
     counts = {"ok": 0, "none": 0, "blocked": 0, "error": 0}
     in_a_row = 0
+    stopped = False
     for i, r in enumerate(rows, 1):
         text, status, detail = youtube.fetch_transcript(r["id"])
         if status == "missing-lib":
             print("  ! youtube-transcript-api is not installed: pip install youtube-transcript-api")
-            return
+            return None
         counts[status] += 1
         if status in ("blocked", "error") and counts[status] == 1:
             print(f"  ! {r['id']}: {status} ({detail})")
@@ -131,6 +135,7 @@ def fetch_transcripts(conn, retry: bool = False, limit: int | None = None):
         in_a_row = in_a_row + 1 if status in ("blocked", "error") else 0
         if in_a_row >= MAX_FAILURES_IN_A_ROW:
             print(f"  ! {in_a_row} failures in a row ({status}); stopping, the rest will be tried next run")
+            stopped = True
             break
         if i % 20 == 0:
             conn.commit()
@@ -139,6 +144,7 @@ def fetch_transcripts(conn, retry: bool = False, limit: int | None = None):
     print("Captions: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
     if counts["blocked"]:
         print("  YouTube is blocking caption requests from this network; they will be retried next run.")
+    return {**counts, "stopped": stopped}
 
 
 def cmd_analyze(args, conn):
@@ -215,7 +221,7 @@ def cmd_report(args, conn):
         if t:
             tech[sym] = t
     path = write_report(periods, args.output, default=args.days, tech=tech, digest=digest.build(conn, stocks),
-                        track=track.build(conn))
+                        track=track.build(conn), captions=db.caption_stats(conn))
     data = periods[args.days]
     print(f"Dashboard written to {path.resolve()} ({len(data['stocks'])} stocks, {len(data['sectors'])} sectors "
           f"over {args.days} days; also {', '.join(str(d) for d in periods if d != args.days)}-day views)")
